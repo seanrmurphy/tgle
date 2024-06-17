@@ -23,6 +23,13 @@ type Message struct {
 	Message string
 }
 
+type TgleSync struct {
+	ID            int64
+	SyncTime      sql.NullInt64
+	MessagesAdded sql.NullInt64
+	LinksAdded    sql.NullInt64
+}
+
 type UserChat struct {
 	ID         int64
 	LastUpdate sql.NullInt64

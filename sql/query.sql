@@ -48,3 +48,23 @@ INSERT INTO user_chats (
 )
 ON CONFLICT (id) DO UPDATE SET last_update=excluded.last_update
 RETURNING *;
+
+-- name: GetLastTGSync :one
+SELECT * FROM tgle_sync
+ORDER BY sync_time DESC
+LIMIT 1;
+
+-- name: GetGSyncById :one
+SELECT * FROM tgle_sync
+WHERE id = ?
+LIMIT 1;
+
+-- name: AddTGSync :one
+INSERT INTO tgle_sync (
+    sync_time,
+    messages_added,
+    links_added
+) VALUES (
+  ?, ?, ?
+)
+RETURNING *;

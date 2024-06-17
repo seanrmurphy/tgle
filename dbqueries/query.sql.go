@@ -10,6 +10,71 @@ import (
 	"database/sql"
 )
 
+const addTGSync = `-- name: AddTGSync :one
+INSERT INTO tgle_sync (
+    sync_time,
+    messages_added,
+    links_added
+) VALUES (
+  ?, ?, ?
+)
+RETURNING id, sync_time, messages_added, links_added
+`
+
+type AddTGSyncParams struct {
+	SyncTime      sql.NullInt64
+	MessagesAdded sql.NullInt64
+	LinksAdded    sql.NullInt64
+}
+
+func (q *Queries) AddTGSync(ctx context.Context, arg AddTGSyncParams) (TgleSync, error) {
+	row := q.db.QueryRowContext(ctx, addTGSync, arg.SyncTime, arg.MessagesAdded, arg.LinksAdded)
+	var i TgleSync
+	err := row.Scan(
+		&i.ID,
+		&i.SyncTime,
+		&i.MessagesAdded,
+		&i.LinksAdded,
+	)
+	return i, err
+}
+
+const getGSyncById = `-- name: GetGSyncById :one
+SELECT id, sync_time, messages_added, links_added FROM tgle_sync
+WHERE id = ?
+LIMIT 1
+`
+
+func (q *Queries) GetGSyncById(ctx context.Context, id int64) (TgleSync, error) {
+	row := q.db.QueryRowContext(ctx, getGSyncById, id)
+	var i TgleSync
+	err := row.Scan(
+		&i.ID,
+		&i.SyncTime,
+		&i.MessagesAdded,
+		&i.LinksAdded,
+	)
+	return i, err
+}
+
+const getLastTGSync = `-- name: GetLastTGSync :one
+SELECT id, sync_time, messages_added, links_added FROM tgle_sync
+ORDER BY sync_time DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastTGSync(ctx context.Context) (TgleSync, error) {
+	row := q.db.QueryRowContext(ctx, getLastTGSync)
+	var i TgleSync
+	err := row.Scan(
+		&i.ID,
+		&i.SyncTime,
+		&i.MessagesAdded,
+		&i.LinksAdded,
+	)
+	return i, err
+}
+
 const getLastUpdateByUser = `-- name: GetLastUpdateByUser :one
 SELECT last_update FROM user_chats
 WHERE id = ?

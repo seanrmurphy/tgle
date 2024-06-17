@@ -34,6 +34,7 @@ import (
 	lj "gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/seanrmurphy/telegram-bot/dbqueries"
+	"github.com/seanrmurphy/telegram-bot/utils"
 
 	"github.com/gotd/td/examples"
 	"github.com/gotd/td/session"
@@ -208,9 +209,9 @@ func createClient(s *Storage, c *Config, peerDB *pebble.PeerStorage) (client *te
 			// Setting up general rate limits to less likely get flood wait errors.
 			ratelimit.New(rate.Every(time.Millisecond*100), 5),
 		},
-		// dcs.Prod() is the default here...
+		// dcs.Prod() is the default here but dcs.Test() can be used when in test
+		// mode and it is necessary to test something with the test deployment...
 		DCList: dcs.Prod(),
-		// DCList: dcs.Test(),
 	}
 	appID, err := strconv.Atoi(c.TelegramAppID)
 	if err != nil {
@@ -219,31 +220,6 @@ func createClient(s *Storage, c *Config, peerDB *pebble.PeerStorage) (client *te
 	client = telegram.NewClient(appID, c.TelegramAppHash, options)
 	return
 }
-
-// func printMessages(messagesClass tg.MessagesMessagesClass) {
-// 	switch messages := messagesClass.(type) {
-// 	case *tg.MessagesMessages:
-// 		for _, mc := range messages.Messages {
-// 			switch m := mc.(type) {
-// 			case *tg.Message:
-// 				log.Printf("message: Date %v, FromID %v, MessageID %v, Message %v", time.Unix(int64(m.Date), 0), m.FromID, m.ID, m.Message)
-// 			default:
-// 				log.Printf("unknown message class: %T", m)
-// 			}
-// 		}
-// 	case *tg.MessagesMessagesSlice:
-// 		for _, mc := range messages.Messages {
-// 			switch m := mc.(type) {
-// 			case *tg.Message:
-// 				log.Printf("message: Date %v, FromID %v, MessageID %v, Message %v", time.Unix(int64(m.Date), 0), m.FromID, m.ID, m.Message)
-// 			default:
-// 				log.Printf("unknown message class: %T", m)
-// 			}
-// 		}
-// 	default:
-// 		log.Printf("unknown messagesmessages class: %T", messages)
-// 	}
-// }
 
 func containsURL(message string) bool {
 	return strings.Contains(message, "http") || strings.Contains(message, "https")
@@ -443,9 +419,10 @@ func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, 
 
 // getMaxOffset ranges over a set of messages and gets the max offset
 // in the set...
-func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64) {
+func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64, numMessages int) {
 	switch messages := messagesClass.(type) {
 	case *tg.MessagesMessages:
+		numMessages = len(messages.Messages)
 		for _, mc := range messages.Messages {
 			switch m := mc.(type) {
 			case *tg.Message:
@@ -457,6 +434,7 @@ func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64) {
 			}
 		}
 	case *tg.MessagesMessagesSlice:
+		numMessages = len(messages.Messages)
 		for _, mc := range messages.Messages {
 			switch m := mc.(type) {
 			case *tg.Message:
@@ -471,7 +449,8 @@ func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64) {
 	return
 }
 
-func getUserDialogMessages(ctx context.Context, client *telegram.Client, p *tg.PeerUser, db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
+func getUserDialogMessages(ctx context.Context, client *telegram.Client, p *tg.PeerUser,
+	db *sql.DB, lastSync time.Time) (messages tg.MessagesMessagesClass, err error) {
 	log.Printf("Dialog type User: getting user info for user = %v", p)
 	userRequest := tg.InputUser{UserID: p.UserID}
 	userInfo, err := client.API().UsersGetFullUser(ctx, &userRequest)
@@ -491,43 +470,65 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, p *tg.P
 	log.Printf("Getting messages from dialog...")
 	peerUser := tg.InputPeerUser{UserID: user.ID}
 	searchRequest := tg.MessagesSearchRequest{
-		Peer:     &peerUser,
-		Limit:    100,
-		Filter:   &tg.InputMessagesFilterURL{},
-		OffsetID: int(lastUpdatePerUser.Int64),
+		Peer:   &peerUser,
+		Limit:  100,
+		Filter: &tg.InputMessagesFilterURL{},
+		MinID:  int(lastUpdatePerUser.Int64),
+		//MinDate: int(lastSync.Unix()),
 	}
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
-	highestOffset := getMaxOffset(messages)
-	insertUserChatParams := dbqueries.InsertUserChatParams{
-		ID:         p.UserID,
-		LastUpdate: sql.NullInt64{Int64: highestOffset, Valid: true},
-	}
-	_, err = queries.InsertUserChat(ctx, insertUserChatParams)
-	if err != nil {
-		log.Printf("error inserting user chat information: %v", err)
-		return
+	highestOffset, numMessages := getMaxOffset(messages)
+	if numMessages != 0 {
+		insertUserChatParams := dbqueries.InsertUserChatParams{
+			ID:         p.UserID,
+			LastUpdate: sql.NullInt64{Int64: highestOffset, Valid: true},
+		}
+		_, err = queries.InsertUserChat(ctx, insertUserChatParams)
+		if err != nil {
+			log.Printf("error inserting user chat information: %v", err)
+			return
+		}
 	}
 	return
 }
 
 // getSavedMessages gets Saved Messages which are messages a user sends to themselves
-func getSavedMessages(ctx context.Context, client *telegram.Client, userID int64) (messages tg.MessagesMessagesClass, err error) {
+func getSavedMessages(ctx context.Context, client *telegram.Client, db *sql.DB, userID int64) (messages tg.MessagesMessagesClass, err error) {
+	queries := dbqueries.New(db)
+	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, userID)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("error getting last update from db - ignoring...")
+	}
+
 	peerUser := tg.InputPeerUser{UserID: userID}
+	// log.Printf("min date int: %v", minDateInt)
 	searchRequest := tg.MessagesSearchRequest{
 		Peer:   &peerUser,
-		Limit:  50,
+		Limit:  100,
 		Filter: &tg.InputMessagesFilterURL{},
-		//Filter: &tg.InputMessagesFilterEmpty{},
+		MinID:  int(lastUpdatePerUser.Int64),
 	}
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	if err != nil {
 		log.Printf("error getting messages: %v", err)
 		return nil, err
 	}
+	highestOffset, numMessages := getMaxOffset(messages)
+	if numMessages != 0 {
+		insertUserChatParams := dbqueries.InsertUserChatParams{
+			ID:         userID,
+			LastUpdate: sql.NullInt64{Int64: highestOffset, Valid: true},
+		}
+		_, err = queries.InsertUserChat(ctx, insertUserChatParams)
+		if err != nil {
+			log.Printf("error inserting user chat information: %v", err)
+			return
+		}
+	}
 	return
 }
 
-func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, userID int64, db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
+func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, userID int64, db *sql.DB, lastSync time.Time) (messages tg.MessagesMessagesClass, err error) {
 	api := client.API()
 	request := tg.MessagesGetDialogsRequest{
 		Flags:         0,
@@ -549,12 +550,13 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 		log.Println()
 		darray := dialogs.(*tg.MessagesDialogs)
 		for _, d := range darray.Dialogs {
-			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db)
+			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db, lastSync)
 			if err != nil {
 				log.Printf("error getting messages: %v", err)
 				return nil, err
 			}
 			if messagesPerDialog != nil {
+				utils.PrintMessages(messages)
 				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
@@ -562,12 +564,13 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 		log.Printf("messagesdialogsslice")
 		darray := dialogs.(*tg.MessagesDialogsSlice)
 		for _, d := range darray.Dialogs {
-			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db)
+			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db, lastSync)
 			if err != nil {
 				log.Printf("error getting messages: %v", err)
 				return nil, err
 			}
 			if messagesPerDialog != nil {
+				utils.PrintMessages(messagesPerDialog)
 				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
@@ -617,11 +620,12 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 // 	return nil
 // }
 
-func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.DialogClass, db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
+func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.DialogClass,
+	db *sql.DB, lastSync time.Time) (messages tg.MessagesMessagesClass, err error) {
 	peer := d.GetPeer()
 	switch p := peer.(type) {
 	case *tg.PeerUser:
-		messages, err = getUserDialogMessages(ctx, client, p, db)
+		messages, err = getUserDialogMessages(ctx, client, p, db, lastSync)
 	case *tg.PeerChat:
 		log.Printf("Dialog type chat = %v - ignoring...", p)
 	case *tg.PeerChannel:
@@ -641,7 +645,7 @@ func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.Dia
 	return
 }
 
-func run(ctx context.Context, c *Config) error {
+func run(ctx context.Context, c *Config, lastSync time.Time) error {
 	s, err := initializeStorage(c)
 	if err != nil {
 		return errors.Wrap(err, "initialize storage")
@@ -713,19 +717,25 @@ func run(ctx context.Context, c *Config) error {
 			defer db.Close()
 
 			// first get Saved Messages - messages a user sends to themselves
-			messages, err := getSavedMessages(ctx, client, self.ID)
+			messages, err := getSavedMessages(ctx, client, db, self.ID)
 			if err != nil {
 				return errors.Wrap(err, "error getting saved messages")
 			}
 			if messages != nil {
+				utils.PrintMessages(messages)
 				_ = storeMessages(ctx, messages, db)
+			} else {
+				log.Printf("no messages received...")
+
 			}
 
 			// next, get messages from user dialogs...
-			messages, err = getMessagesFromUserDialogs(ctx, client, self.ID, db)
+			// uncomment below when it seems to work...
+			messages, err = getMessagesFromUserDialogs(ctx, client, self.ID, db, lastSync)
 			if err != nil {
 				return errors.Wrap(err, "error getting messages from user dialogs")
 			}
+
 			// storeMessages(ctx, messages)
 
 			// if arg.FillPeerStorage {
@@ -753,6 +763,57 @@ func run(ctx context.Context, c *Config) error {
 	})
 }
 
+func writeSyncRecord(ctx context.Context, c *Config) error {
+	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
+	if err != nil {
+		log.Printf("error opening database: %v", err)
+		return err
+	}
+
+	// create tables
+	if _, err = db.ExecContext(ctx, ddl); err != nil {
+		log.Printf("error creating db tables: %v", err)
+		return err
+	}
+	defer db.Close()
+
+	queries := dbqueries.New(db)
+
+	addTGSyncParams := dbqueries.AddTGSyncParams{
+		SyncTime: sql.NullInt64{Int64: time.Now().UnixMilli(), Valid: true},
+	}
+	_, err = queries.AddTGSync(ctx, addTGSyncParams)
+	if err != nil {
+		log.Printf("error adding sync record: %v", err)
+		return err
+	}
+	return nil
+}
+
+func getLastSyncTime(ctx context.Context, c *Config) (*dbqueries.TgleSync, error) {
+	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
+	if err != nil {
+		log.Printf("error opening database: %v", err)
+		return nil, err
+	}
+
+	// create tables
+	if _, err = db.ExecContext(ctx, ddl); err != nil {
+		log.Printf("error creating db tables: %v", err)
+		return nil, err
+	}
+	defer db.Close()
+
+	queries := dbqueries.New(db)
+
+	lastSyncRecord, err := queries.GetLastTGSync(ctx)
+	if err != nil {
+		log.Printf("error getting last sync record: %v", err)
+		return nil, err
+	}
+	return &lastSyncRecord, nil
+}
+
 func main() {
 	c, err := readConfig()
 	if err != nil {
@@ -766,7 +827,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, c); err != nil {
+	// TODO: Add logic to handle the case in which this record does not exist...
+	lastSyncRecord, _ := getLastSyncTime(ctx, c)
+	lastSync := time.UnixMilli(lastSyncRecord.SyncTime.Int64)
+	fmt.Printf("last sync time: %v (%v)\n", lastSync, lastSyncRecord.SyncTime.Int64)
+
+	if err := run(ctx, c, lastSync); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
 			fmt.Println("\rClosed")
 			defer func() {
@@ -780,8 +846,8 @@ func main() {
 			os.Exit(1)
 		}()
 		return
-
 	}
 
+	_ = writeSyncRecord(ctx, c)
 	fmt.Println("Done")
 }
