@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/chasefleming/elem-go"
@@ -18,13 +19,15 @@ import (
 )
 
 type App struct {
-	htmx *htmx.HTMX
+	htmx   *htmx.HTMX
+	config *Config
 }
 
-func runServer() {
+func runServer(c *Config) {
 	// new app with htmx instance
 	app := &App{
-		htmx: htmx.New(),
+		htmx:   htmx.New(),
+		config: c,
 	}
 
 	mux := http.NewServeMux()
@@ -38,13 +41,22 @@ func runServer() {
 }
 
 func (a *App) Links(w http.ResponseWriter, r *http.Request) {
-	db, _ := sql.Open("sqlite3", dbFilename)
+	// initiate a new htmx handler
+	h := a.htmx.NewHandler(w, r)
+
+	dbFullFilename := filepath.Join(a.config.TgleStateDirectory, dbFilename)
+	db, err := sql.Open("sqlite3", dbFullFilename)
+	if err != nil {
+		log.Printf("error opening database: %v", err)
+		content := elem.Div(attrs.Props{}, elem.P(attrs.Props{}, elem.Text("unable to open database")))
+		// _, _ = h.Write(byte[](returnString))
+		_, _ = h.Write([]byte(content.Render()))
+		return
+
+	}
 	defer db.Close()
 
 	queries := dbqueries.New(db)
-
-	// initiate a new htmx handler
-	h := a.htmx.NewHandler(w, r)
 
 	links, err := queries.GetLinks(context.TODO())
 	if err != nil {
@@ -92,12 +104,6 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 
 	// write the output like you normally do.
 	// check the inspector tool in the browser to see that the headers are set.
-	returnString := "<div><h1>links</h1> <ul>"
-	for _, link := range links {
-		returnString += "<li>" + link.Url + "</li>"
-	}
-	returnString += "</ul></div>"
-
 	liElements := elem.TransformEach(links, func(link dbqueries.Link) elem.Node {
 		return elem.Li(nil, elem.Text(link.Url))
 	})

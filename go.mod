@@ -6,6 +6,7 @@ toolchain go1.22.2
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.1
+	github.com/adrg/xdg v0.4.0
 	github.com/chasefleming/elem-go v0.26.0
 	github.com/cockroachdb/pebble v1.1.0
 	github.com/donseba/go-htmx v1.8.0
@@ -15,6 +16,7 @@ require (
 	github.com/gotd/td/examples v0.0.0-20240611173651-eadb69ca12d5
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.22
+	github.com/pelletier/go-toml/v2 v2.0.5
 	go.etcd.io/bbolt v1.3.10
 	go.uber.org/zap v1.27.0
 	golang.org/x/time v0.5.0

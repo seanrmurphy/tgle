@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -26,7 +27,6 @@ import (
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/contrib/pebble"
 	"github.com/gotd/contrib/storage"
-	"github.com/joho/godotenv"
 	"go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -44,6 +44,9 @@ import (
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 )
+
+//go:embed sql/schema.sql
+var ddl string
 
 var dbFilename = "sqlite.db"
 
@@ -71,11 +74,11 @@ type Handlers struct {
 	UpdatesRecovery *updates.Manager
 }
 
-type Config struct {
-	Phone   string
-	AppID   int
-	AppHash string
-}
+// type Config struct {
+// 	Phone   string
+// 	AppID   int
+// 	AppHash string
+// }
 
 func sessionFolder(phone string) string {
 	var out []rune
@@ -87,31 +90,31 @@ func sessionFolder(phone string) string {
 	return "phone-" + string(out)
 }
 
-func getEnvironmentVariables() (c *Config, err error) {
-	c = &Config{}
-	// Using ".env" file to load environment variables.
-	if err = godotenv.Load(); err != nil && !os.IsNotExist(err) {
-		return nil, errors.Wrap(err, "load env")
-	}
-
-	// TG_PHONE is phone number in international format.
-	// Like +4123456789.
-	c.Phone = os.Getenv("TG_PHONE")
-	if c.Phone == "" {
-		return nil, errors.New("no phone")
-	}
-	// APP_HASH, APP_ID is from https://my.telegram.org/.
-	c.AppID, err = strconv.Atoi(os.Getenv("APP_ID"))
-	if err != nil {
-		return nil, errors.Wrap(err, " parse app id")
-	}
-	c.AppHash = os.Getenv("APP_HASH")
-	if c.AppHash == "" {
-		return nil, errors.New("no app hash")
-	}
-
-	return
-}
+// func getEnvironmentVariables() (c *Config, err error) {
+// 	c = &Config{}
+// 	// Using ".env" file to load environment variables.
+// 	if err = godotenv.Load(); err != nil && !os.IsNotExist(err) {
+// 		return nil, errors.Wrap(err, "load env")
+// 	}
+//
+// 	// TG_PHONE is phone number in international format.
+// 	// Like +4123456789.
+// 	c.TelegramPhoneNumber = os.Getenv("TG_PHONE")
+// 	if c.TelegramPhoneNumber == "" {
+// 		return nil, errors.New("no phone")
+// 	}
+// 	// APP_HASH, APP_ID is from https://my.telegram.org/.
+// 	c.TelegramAppID = os.Getenv("APP_ID")
+// 	if err != nil {
+// 		return nil, errors.Wrap(err, " parse app id")
+// 	}
+// 	c.TelegramAppHash = os.Getenv("APP_HASH")
+// 	if c.TelegramAppHash == "" {
+// 		return nil, errors.New("no app hash")
+// 	}
+//
+// 	return
+// }
 
 func createLogger(logFilePath string) *zap.Logger {
 	// Setting up logging to file with rotation.
@@ -142,7 +145,7 @@ func initializeStorage(c *Config) (s *Storage, err error) {
 	s = &Storage{}
 	// Setting up session storage.
 	// This is needed to reuse session and not login every time.
-	s.SessionDir = filepath.Join("session", sessionFolder(c.Phone))
+	s.SessionDir = filepath.Join(c.TgleStateDirectory, "session", sessionFolder(c.TelegramPhoneNumber))
 	if err = os.MkdirAll(s.SessionDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -207,7 +210,11 @@ func createClient(s *Storage, c *Config, peerDB *pebble.PeerStorage) (client *te
 		DCList: dcs.Prod(),
 		// DCList: dcs.Test(),
 	}
-	client = telegram.NewClient(c.AppID, c.AppHash, options)
+	appID, err := strconv.Atoi(c.TelegramAppID)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "error parsing app id")
+	}
+	client = telegram.NewClient(appID, c.TelegramAppHash, options)
 	return
 }
 
@@ -616,12 +623,7 @@ func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.Dia
 	return
 }
 
-func run(ctx context.Context) error {
-	c, err := getEnvironmentVariables()
-	if err != nil {
-		return err
-	}
-
+func run(ctx context.Context, c *Config) error {
 	s, err := initializeStorage(c)
 	if err != nil {
 		return errors.Wrap(err, "initialize storage")
@@ -647,7 +649,7 @@ func run(ctx context.Context) error {
 	_ = resolver
 
 	// Authentication flow handles authentication process, like prompting for code and 2FA password.
-	flow := auth.NewFlow(examples.Terminal{PhoneNumber: c.Phone}, auth.SendCodeOptions{})
+	flow := auth.NewFlow(examples.Terminal{PhoneNumber: c.TelegramPhoneNumber}, auth.SendCodeOptions{})
 
 	return handlers.Waiter.Run(ctx, func(ctx context.Context) error {
 
@@ -678,9 +680,16 @@ func run(ctx context.Context) error {
 				zap.Int64("id", self.ID),
 			)
 
-			db, err := sql.Open("sqlite3", dbFilename)
+			dbFullFilename := filepath.Join(c.TgleStateDirectory, dbFilename)
+			db, err := sql.Open("sqlite3", dbFullFilename)
 			if err != nil {
 				log.Printf("error opening database: %v", err)
+				return err
+			}
+
+			// create tables
+			if _, err = db.ExecContext(ctx, ddl); err != nil {
+				log.Printf("error creating db tables: %v", err)
 				return err
 			}
 			defer db.Close()
@@ -727,14 +736,19 @@ func run(ctx context.Context) error {
 }
 
 func main() {
+	c, err := readConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if arg.ServerMode {
-		runServer()
+		runServer(c)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx); err != nil {
+	if err := run(ctx, c); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
 			fmt.Println("\rClosed")
 			os.Exit(0)
