@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/adrg/xdg"
 	"github.com/go-faster/errors"
 	"github.com/pelletier/go-toml/v2"
 )
 
+// ApplicationName is used to determine where files will be stored within the
+// XDG directory system. Currently, it is assumed that this is unique, ie that
+// another application call "tgle" does not already exist."
 var ApplicationName = "tgle"
 
+// Config contains the c configuration for the application.
 type Config struct {
 	TgleStateDirectory  string
 	TelegramPhoneNumber string
@@ -20,6 +25,7 @@ type Config struct {
 }
 
 func readConfigFile(configFilePath string) (cfg *Config, err error) {
+	configFilePath = filepath.Clean(configFilePath)
 	fileContent, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return cfg, errors.Wrap(err, "unable to read config file")
@@ -33,6 +39,7 @@ func readConfigFile(configFilePath string) (cfg *Config, err error) {
 }
 
 func writeConfig(configFilePath string, cfg Config) error {
+	configFilePath = filepath.Clean(configFilePath)
 	file, err := os.Create(configFilePath)
 	if err != nil {
 		return errors.Wrap(err, "unable to create config file")
@@ -64,15 +71,15 @@ func readConfig() (cfg *Config, err error) {
 
 		fmt.Println("enter telegram phone number: (use format +1234567890): ")
 		var phoneNumber string
-		fmt.Scanln(&phoneNumber)
+		_, _ = fmt.Scanln(&phoneNumber)
 
 		fmt.Println("enter telegram app id: ")
 		var appID string
-		fmt.Scanln(&appID)
+		_, _ = fmt.Scanln(&appID)
 
 		fmt.Println("enter telegram app hash: ")
 		var appHash string
-		fmt.Scanln(&appHash)
+		_, _ = fmt.Scanln(&appHash)
 
 		TgleStateDirectory := xdg.StateHome + "/" + ApplicationName
 

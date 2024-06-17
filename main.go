@@ -51,6 +51,7 @@ var ddl string
 var dbFilename = "sqlite.db"
 
 var (
+	// ErrRowExists is returned when trying to create a record for a row which already exists
 	ErrRowExists = errors.New("row exists")
 )
 
@@ -61,6 +62,9 @@ var arg struct {
 	ServerMode      bool
 }
 
+// Storage is a wrapper aound the different storage types; these storage types were defined
+// in the original userbot all of this is based on but I'm still not sure if they are really
+// necessary here...
 type Storage struct {
 	SessionDir     string
 	LogFilePath    string
@@ -68,17 +72,15 @@ type Storage struct {
 	DB             *pebbledb.DB
 }
 
+// Handlers is a wrapper around the different handlers; these handlers were defined in the
+// original userbot all of this is based on but I'm still not sure if they are really
+// required here - they seem to be a basic mechanism of the telegram API when the objective
+// is to create an interactive client.
 type Handlers struct {
 	Dispatcher      tg.UpdateDispatcher
 	Waiter          *floodwait.Waiter
 	UpdatesRecovery *updates.Manager
 }
-
-// type Config struct {
-// 	Phone   string
-// 	AppID   int
-// 	AppHash string
-// }
 
 func sessionFolder(phone string) string {
 	var out []rune
@@ -218,30 +220,30 @@ func createClient(s *Storage, c *Config, peerDB *pebble.PeerStorage) (client *te
 	return
 }
 
-func printMessages(messagesClass tg.MessagesMessagesClass) {
-	switch messages := messagesClass.(type) {
-	case *tg.MessagesMessages:
-		for _, mc := range messages.Messages {
-			switch m := mc.(type) {
-			case *tg.Message:
-				log.Printf("message: Date %v, FromID %v, MessageID %v, Message %v", time.Unix(int64(m.Date), 0), m.FromID, m.ID, m.Message)
-			default:
-				log.Printf("unknown message class: %T", m)
-			}
-		}
-	case *tg.MessagesMessagesSlice:
-		for _, mc := range messages.Messages {
-			switch m := mc.(type) {
-			case *tg.Message:
-				log.Printf("message: Date %v, FromID %v, MessageID %v, Message %v", time.Unix(int64(m.Date), 0), m.FromID, m.ID, m.Message)
-			default:
-				log.Printf("unknown message class: %T", m)
-			}
-		}
-	default:
-		log.Printf("unknown messagesmessages class: %T", messages)
-	}
-}
+// func printMessages(messagesClass tg.MessagesMessagesClass) {
+// 	switch messages := messagesClass.(type) {
+// 	case *tg.MessagesMessages:
+// 		for _, mc := range messages.Messages {
+// 			switch m := mc.(type) {
+// 			case *tg.Message:
+// 				log.Printf("message: Date %v, FromID %v, MessageID %v, Message %v", time.Unix(int64(m.Date), 0), m.FromID, m.ID, m.Message)
+// 			default:
+// 				log.Printf("unknown message class: %T", m)
+// 			}
+// 		}
+// 	case *tg.MessagesMessagesSlice:
+// 		for _, mc := range messages.Messages {
+// 			switch m := mc.(type) {
+// 			case *tg.Message:
+// 				log.Printf("message: Date %v, FromID %v, MessageID %v, Message %v", time.Unix(int64(m.Date), 0), m.FromID, m.ID, m.Message)
+// 			default:
+// 				log.Printf("unknown message class: %T", m)
+// 			}
+// 		}
+// 	default:
+// 		log.Printf("unknown messagesmessages class: %T", messages)
+// 	}
+// }
 
 func containsURL(message string) bool {
 	return strings.Contains(message, "http") || strings.Contains(message, "https")
@@ -259,9 +261,17 @@ func extractURL(message string) (string, error) {
 	return urls[0], nil
 }
 
-func getPageTitle(url string) (string, error) {
+func getPageTitle(uri string) (string, error) {
 
-	res, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, uri, nil)
+	if err != nil {
+		return "", err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
 
 	if err != nil {
 		log.Fatal(err)
@@ -276,7 +286,10 @@ func getPageTitle(url string) (string, error) {
 	// Load the HTML document
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("error loading document: %v", err)
+		defer func() {
+			os.Exit(1)
+		}()
 	}
 
 	title := doc.Find("title").Text()
@@ -284,54 +297,54 @@ func getPageTitle(url string) (string, error) {
 
 }
 
-func printMessagesToFile(filename string, messagesClass tg.MessagesMessagesClass) error {
-	log.Printf("Writing messages to %s", filename)
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Printf("error opening file: %v", err)
-		return err
-	}
-	defer f.Close()
-	switch messages := messagesClass.(type) {
-	case *tg.MessagesMessages:
-		for _, mc := range messages.Messages {
-			switch m := mc.(type) {
-			case *tg.Message:
-				if containsURL(m.Message) {
-					messageUrl, err := extractURL(m.Message)
-					if err != nil {
-						log.Printf("unable to extract url from message")
-					} else {
-						title, _ := getPageTitle(messageUrl)
-						fmt.Fprintf(f, "Date %v, FromID %v, MessageID %v, Url: %v, PageTitle: %v, Message %v\n\n", time.Unix(int64(m.Date), 0), m.FromID, m.ID, messageUrl, title, m.Message)
-					}
-				}
-			default:
-				log.Printf("unknown message class: %T", m)
-			}
-		}
-	case *tg.MessagesMessagesSlice:
-		for _, mc := range messages.Messages {
-			switch m := mc.(type) {
-			case *tg.Message:
-				if containsURL(m.Message) {
-					messageUrl, err := extractURL(m.Message)
-					if err != nil {
-						log.Printf("unable to extract url from message")
-					} else {
-						title, _ := getPageTitle(messageUrl)
-						fmt.Fprintf(f, "Date %v, FromID %v, MessageID %v, Url: %v, PageTitle: %v, Message %v\n\n", time.Unix(int64(m.Date), 0), m.FromID, m.ID, messageUrl, title, m.Message)
-					}
-				}
-			default:
-				log.Printf("unknown message class: %T", m)
-			}
-		}
-	default:
-		log.Printf("unknown messagesmessages class: %T", messages)
-	}
-	return nil
-}
+// func printMessagesToFile(filename string, messagesClass tg.MessagesMessagesClass) error {
+// 	log.Printf("Writing messages to %s", filename)
+// 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+// 	if err != nil {
+// 		log.Printf("error opening file: %v", err)
+// 		return err
+// 	}
+// 	defer f.Close()
+// 	switch messages := messagesClass.(type) {
+// 	case *tg.MessagesMessages:
+// 		for _, mc := range messages.Messages {
+// 			switch m := mc.(type) {
+// 			case *tg.Message:
+// 				if containsURL(m.Message) {
+// 					messageURl, err := extractURL(m.Message)
+// 					if err != nil {
+// 						log.Printf("unable to extract url from message")
+// 					} else {
+// 						title, _ := getPageTitle(messageUrl)
+// 						fmt.Fprintf(f, "Date %v, FromID %v, MessageID %v, Url: %v, PageTitle: %v, Message %v\n\n", time.Unix(int64(m.Date), 0), m.FromID, m.ID, messageUrl, title, m.Message)
+// 					}
+// 				}
+// 			default:
+// 				log.Printf("unknown message class: %T", m)
+// 			}
+// 		}
+// 	case *tg.MessagesMessagesSlice:
+// 		for _, mc := range messages.Messages {
+// 			switch m := mc.(type) {
+// 			case *tg.Message:
+// 				if containsURL(m.Message) {
+// 					messageURL, err := extractURL(m.Message)
+// 					if err != nil {
+// 						log.Printf("unable to extract url from message")
+// 					} else {
+// 						title, _ := getPageTitle(messageUrl)
+// 						fmt.Fprintf(f, "Date %v, FromID %v, MessageID %v, Url: %v, PageTitle: %v, Message %v\n\n", time.Unix(int64(m.Date), 0), m.FromID, m.ID, messageUrl, title, m.Message)
+// 					}
+// 				}
+// 			default:
+// 				log.Printf("unknown message class: %T", m)
+// 			}
+// 		}
+// 	default:
+// 		log.Printf("unknown messagesmessages class: %T", messages)
+// 	}
+// 	return nil
+// }
 
 func storeMessage(ctx context.Context, db *sql.DB, message tg.Message) error {
 	queries := dbqueries.New(db)
@@ -372,7 +385,10 @@ func storeLink(ctx context.Context, db *sql.DB, m tg.Message) error {
 				PageTitle: sql.NullString{String: title, Valid: true},
 				Tags:      sql.NullString{},
 			}
-			queries.InsertLink(ctx, insertLinkParams)
+			_, err = queries.InsertLink(ctx, insertLinkParams)
+			if err != nil {
+				log.Printf("Error inserting link: %v", err)
+			}
 		} else {
 			log.Printf("unable to extract url from message")
 		}
@@ -396,7 +412,7 @@ func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, 
 				if err == nil {
 					newMessagesStored++
 				}
-				storeLink(ctx, db, *m)
+				_ = storeLink(ctx, db, *m)
 
 			default:
 				log.Printf("unknown message class: %T", m)
@@ -413,7 +429,7 @@ func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, 
 				if err == nil {
 					newMessagesStored++
 				}
-				storeLink(ctx, db, *m)
+				_ = storeLink(ctx, db, *m)
 			default:
 				log.Printf("unknown message class: %T", m)
 			}
@@ -447,6 +463,8 @@ func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64) {
 				if int64(m.ID) > maxOffset {
 					maxOffset = int64(m.ID)
 				}
+			default:
+				log.Printf("unknown message class: %T", m)
 			}
 		}
 	}
@@ -484,9 +502,9 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, p *tg.P
 		ID:         p.UserID,
 		LastUpdate: sql.NullInt64{Int64: highestOffset, Valid: true},
 	}
-	queries.InsertUserChat(ctx, insertUserChatParams)
+	_, err = queries.InsertUserChat(ctx, insertUserChatParams)
 	if err != nil {
-		log.Printf("error getting messages: %v", err)
+		log.Printf("error inserting user chat information: %v", err)
 		return
 	}
 	return
@@ -537,7 +555,7 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 				return nil, err
 			}
 			if messagesPerDialog != nil {
-				storeMessages(ctx, messagesPerDialog, db)
+				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
 	case tg.MessagesDialogsSliceTypeID:
@@ -550,7 +568,7 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 				return nil, err
 			}
 			if messagesPerDialog != nil {
-				storeMessages(ctx, messagesPerDialog, db)
+				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
 	case tg.MessagesDialogsNotModifiedTypeID:
@@ -700,7 +718,7 @@ func run(ctx context.Context, c *Config) error {
 				return errors.Wrap(err, "error getting saved messages")
 			}
 			if messages != nil {
-				storeMessages(ctx, messages, db)
+				_ = storeMessages(ctx, messages, db)
 			}
 
 			// next, get messages from user dialogs...
@@ -708,7 +726,7 @@ func run(ctx context.Context, c *Config) error {
 			if err != nil {
 				return errors.Wrap(err, "error getting messages from user dialogs")
 			}
-			//storeMessages(ctx, messages)
+			// storeMessages(ctx, messages)
 
 			// if arg.FillPeerStorage {
 			// 	fmt.Println("Filling peer storage from dialogs to cache entities")
@@ -751,12 +769,19 @@ func main() {
 	if err := run(ctx, c); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
 			fmt.Println("\rClosed")
-			os.Exit(0)
+			defer func() {
+				os.Exit(1)
+			}()
+			return
 		}
+
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
-		os.Exit(1)
-	} else {
-		fmt.Println("Done")
-		os.Exit(0)
+		defer func() {
+			os.Exit(1)
+		}()
+		return
+
 	}
+
+	fmt.Println("Done")
 }

@@ -48,4 +48,3 @@ INSERT INTO user_chats (
 )
 ON CONFLICT (id) DO UPDATE SET last_update=excluded.last_update
 RETURNING *;
-

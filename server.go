@@ -18,6 +18,7 @@ import (
 	"github.com/seanrmurphy/telegram-bot/dbqueries"
 )
 
+// App contains basic information for a htmx application.
 type App struct {
 	htmx   *htmx.HTMX
 	config *Config
@@ -36,10 +37,19 @@ func runServer(c *Config) {
 	mux.Handle("/links", middleware.MiddleWare(http.HandlerFunc(app.Links)))
 
 	log.Printf("running server on port 3000...")
-	err := http.ListenAndServe(":3000", mux)
+	srv := &http.Server{
+		Addr:              ":3000",
+		ReadTimeout:       1 * time.Second,
+		WriteTimeout:      1 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 2 * time.Second,
+		Handler:           mux,
+	}
+	err := srv.ListenAndServe()
 	log.Fatal(err)
 }
 
+// Links is the handler for /links.
 func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 	// initiate a new htmx handler
 	h := a.htmx.NewHandler(w, r)
@@ -75,24 +85,9 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the request is a htmx request
+	// TODO: add logic to deal with case that this is not a htmx request
 	if h.IsHxRequest() {
-		// do something
 		log.Printf("htmx request - %v", h.Request())
-	}
-
-	// check if the request is boosted
-	if h.IsHxBoosted() {
-		// do something
-	}
-
-	// check if the request is a history restore request
-	if h.IsHxHistoryRestoreRequest() {
-		// do something
-	}
-
-	// check if the request is a prompt request
-	if h.RenderPartial() {
-		// do something
 	}
 
 	// set the headers for the response, see docs for more options
@@ -116,29 +111,18 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.Write([]byte(content.Render()))
 }
 
+// Home is the handler for the home page; it is assumed that this is not
+// called via htmx - it should be called via standard html and it returns the
+// home page.
 func (a *App) Home(w http.ResponseWriter, r *http.Request) {
 	// initiate a new htmx handler
 	h := a.htmx.NewHandler(w, r)
 
 	// check if the request is a htmx request
+	// TODO: add logic to deal with case that this is not a htmx request
 	if h.IsHxRequest() {
 		// do something
 		log.Printf("htmx request - %v", h.Request())
-	}
-
-	// check if the request is boosted
-	if h.IsHxBoosted() {
-		// do something
-	}
-
-	// check if the request is a history restore request
-	if h.IsHxHistoryRestoreRequest() {
-		// do something
-	}
-
-	// check if the request is a prompt request
-	if h.RenderPartial() {
-		// do something
 	}
 
 	// set the headers for the response, see docs for more options
