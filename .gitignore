@@ -1,0 +1,7 @@
+session
+vendor
+.env
+messages.out
+secrets.txt
+sqlite.db
+telegram-bot
