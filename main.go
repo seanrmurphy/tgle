@@ -61,6 +61,8 @@ var lg *zap.Logger
 var arg struct {
 	FillPeerStorage bool
 	ServerMode      bool
+	JSONReport      bool
+	MarkdownReport  bool
 }
 
 // Storage is a wrapper aound the different storage types; these storage types were defined
@@ -141,6 +143,8 @@ func createLogger(logFilePath string) *zap.Logger {
 func init() {
 	flag.BoolVar(&arg.FillPeerStorage, "fill-peer-storage", false, "fill peer storage")
 	flag.BoolVar(&arg.ServerMode, "server", false, "enable server mode")
+	flag.BoolVar(&arg.JSONReport, "json", false, "generate link report in JSON format")
+	flag.BoolVar(&arg.MarkdownReport, "markdown", false, "generate link report in markdown format")
 	flag.Parse()
 }
 
@@ -818,14 +822,46 @@ func getLastSyncTime(ctx context.Context, c *Config) (*dbqueries.TgleSync, error
 	return &lastSyncRecord, nil
 }
 
+func validateArgs() (bool, error) {
+	// currently only allow one of server, jsonreport and markdownreport to be set
+	// it's also ok if none are set and then we just scrape the links
+	settings := 0
+	if arg.ServerMode {
+		settings++
+	}
+	if arg.JSONReport {
+		settings++
+	}
+	if arg.MarkdownReport {
+		settings++
+	}
+	if settings > 1 {
+		return false, errors.New("only one of server, jsonreport and markdownreport can be set")
+	}
+	return true, nil
+}
+
 func main() {
+	validArgs, err := validateArgs()
+	if !validArgs {
+		log.Fatalf("invalid arguments: %v - exiting...", err)
+	}
+
 	c, err := readConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if arg.ServerMode {
+	switch {
+	case arg.ServerMode:
 		runServer(c)
+		return
+	case arg.JSONReport:
+		_ = generateJSONReport(c)
+		return
+	case arg.MarkdownReport:
+		_ = generateMarkdownReport(c)
+		return
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)

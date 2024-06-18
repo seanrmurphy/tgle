@@ -52,9 +52,16 @@ func runServer(c *Config) {
 func generateContent(links []dbqueries.Link) []byte {
 
 	liElements := elem.TransformEach(links, func(link dbqueries.Link) elem.Node {
+
+		// TODO: Should change this such that there is a sensible link title in the db
+		// for twitter links
+		linkText := link.PageTitle.String
+		if link.PageTitle.String == "" || link.PageTitle.String == "x.com" {
+			linkText = link.Url
+		}
 		return elem.Div(attrs.Props{attrs.Class: "link-box"},
 			elem.A(attrs.Props{attrs.Class: "link-text", attrs.Href: link.Url},
-				elem.Text(link.Url)))
+				elem.Text(linkText)))
 	})
 
 	ulElement := elem.Ul(nil, liElements...)
