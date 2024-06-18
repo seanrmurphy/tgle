@@ -19,9 +19,13 @@
                 width:100%;
                 padding: 5px;
                 margin: 5px;
-                background-color: rgba(200, 200, 200, 0.8);
+                background-color: #fafafa;
+                color:  #7c73e6;
                 border-width: 1px;
-                border-color: rgba(100, 100, 100, 0.8);
+                border-color: #cca8e9;
+            }
+            .link-text{
+                width:100%;
             }
         </style>
     </head>
@@ -30,7 +34,7 @@
             <h1 class="text-3xl mb-5 flex justify-center"><span>tg-le Links</span></h1>
             <div>
                 <input name="pokemon" type="text" hx-post="/search" hx-trigger="keyup delay:500ms" hx-target="#results" hx-indicator=".htmx-indicator"
-                       class="p-2 border rounded w-full" placeholder="Search for a Pokemon...">
+                       class="p-2 border rounded w-full" placeholder="Search for a link...">
                 <div class="my-2 htmx-indicator" >Loading...</div>
                 <div id="results" class="flex justify-center"></div>
             </div>

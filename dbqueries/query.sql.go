@@ -89,8 +89,9 @@ func (q *Queries) GetLastUpdateByUser(ctx context.Context, id int64) (sql.NullIn
 }
 
 const getLinks = `-- name: GetLinks :many
-SELECT id, url, site, page_title, tags FROM links
-LIMIT 20
+SELECT id, created_at, url, site, page_title, tags FROM links
+ORDER BY created_at DESC
+LIMIT 50
 `
 
 func (q *Queries) GetLinks(ctx context.Context) ([]Link, error) {
@@ -104,6 +105,7 @@ func (q *Queries) GetLinks(ctx context.Context) ([]Link, error) {
 		var i Link
 		if err := rows.Scan(
 			&i.ID,
+			&i.CreatedAt,
 			&i.Url,
 			&i.Site,
 			&i.PageTitle,
@@ -179,11 +181,12 @@ INSERT INTO links (
     url,
     site,
     page_title,
-    tags
+    tags,
+    created_at
 ) VALUES (
-  ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?
 )
-RETURNING id, url, site, page_title, tags
+RETURNING id, created_at, url, site, page_title, tags
 `
 
 type InsertLinkParams struct {
@@ -192,6 +195,7 @@ type InsertLinkParams struct {
 	Site      sql.NullString
 	PageTitle sql.NullString
 	Tags      sql.NullString
+	CreatedAt int64
 }
 
 func (q *Queries) InsertLink(ctx context.Context, arg InsertLinkParams) (Link, error) {
@@ -201,10 +205,12 @@ func (q *Queries) InsertLink(ctx context.Context, arg InsertLinkParams) (Link, e
 		arg.Site,
 		arg.PageTitle,
 		arg.Tags,
+		arg.CreatedAt,
 	)
 	var i Link
 	err := row.Scan(
 		&i.ID,
+		&i.CreatedAt,
 		&i.Url,
 		&i.Site,
 		&i.PageTitle,

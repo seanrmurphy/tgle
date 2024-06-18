@@ -10,6 +10,7 @@ import (
 
 type Link struct {
 	ID        int64
+	CreatedAt int64
 	Url       string
 	Site      sql.NullString
 	PageTitle sql.NullString

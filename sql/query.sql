@@ -1,6 +1,7 @@
 -- name: GetLinks :many
 SELECT * FROM links
-LIMIT 20;
+ORDER BY created_at DESC
+LIMIT 50;
 
 -- name: GetMessages :many
 SELECT * FROM messages
@@ -22,9 +23,10 @@ INSERT INTO links (
     url,
     site,
     page_title,
-    tags
+    tags,
+    created_at
 ) VALUES (
-  ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?
 )
 RETURNING *;
 

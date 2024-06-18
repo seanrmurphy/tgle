@@ -52,7 +52,9 @@ func runServer(c *Config) {
 func generateContent(links []dbqueries.Link) []byte {
 
 	liElements := elem.TransformEach(links, func(link dbqueries.Link) elem.Node {
-		return elem.Div(attrs.Props{attrs.Class: "link-box"}, elem.A(attrs.Props{attrs.Href: link.Url}, elem.Text(link.Url)))
+		return elem.Div(attrs.Props{attrs.Class: "link-box"},
+			elem.A(attrs.Props{attrs.Class: "link-text", attrs.Href: link.Url},
+				elem.Text(link.Url)))
 	})
 
 	ulElement := elem.Ul(nil, liElements...)

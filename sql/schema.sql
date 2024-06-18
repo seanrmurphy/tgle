@@ -1,6 +1,7 @@
 -- somewhat decoupled from the migrations folder - has to be kept in sync...
 CREATE TABLE IF NOT EXISTS links (
     id INTEGER PRIMARY KEY,
+    created_at INTEGER NOT NULL,
     url TEXT NOT NULL,
     site TEXT,
     page_title TEXT,

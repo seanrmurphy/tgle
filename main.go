@@ -360,6 +360,7 @@ func storeLink(ctx context.Context, db *sql.DB, m tg.Message) error {
 				Site:      sql.NullString{},
 				PageTitle: sql.NullString{String: title, Valid: true},
 				Tags:      sql.NullString{},
+				CreatedAt: int64(time.Now().UnixMilli()),
 			}
 			_, err = queries.InsertLink(ctx, insertLinkParams)
 			if err != nil {
@@ -808,6 +809,9 @@ func getLastSyncTime(ctx context.Context, c *Config) (*dbqueries.TgleSync, error
 
 	lastSyncRecord, err := queries.GetLastTGSync(ctx)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		log.Printf("error getting last sync record: %v", err)
 		return nil, err
 	}
@@ -829,8 +833,11 @@ func main() {
 
 	// TODO: Add logic to handle the case in which this record does not exist...
 	lastSyncRecord, _ := getLastSyncTime(ctx, c)
-	lastSync := time.UnixMilli(lastSyncRecord.SyncTime.Int64)
-	fmt.Printf("last sync time: %v (%v)\n", lastSync, lastSyncRecord.SyncTime.Int64)
+	lastSync := time.UnixMilli(0)
+	if lastSyncRecord != nil {
+		lastSync = time.UnixMilli(lastSyncRecord.SyncTime.Int64)
+	}
+	fmt.Printf("last sync time: %v\n", lastSync)
 
 	if err := run(ctx, c, lastSync); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
