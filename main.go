@@ -33,8 +33,8 @@ import (
 	"golang.org/x/time/rate"
 	lj "gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/seanrmurphy/telegram-bot/dbqueries"
-	"github.com/seanrmurphy/telegram-bot/utils"
+	"github.com/seanrmurphy/tgle/dbqueries"
+	"github.com/seanrmurphy/tgle/utils"
 
 	"github.com/gotd/td/examples"
 	"github.com/gotd/td/session"

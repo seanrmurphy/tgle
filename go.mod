@@ -1,4 +1,4 @@
-module github.com/seanrmurphy/telegram-bot
+module github.com/seanrmurphy/tgle
 
 go 1.22
 

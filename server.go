@@ -15,7 +15,7 @@ import (
 	"github.com/donseba/go-htmx"
 	"github.com/donseba/go-htmx/middleware"
 
-	"github.com/seanrmurphy/telegram-bot/dbqueries"
+	"github.com/seanrmurphy/tgle/dbqueries"
 )
 
 // App contains basic information for a htmx application.
@@ -47,6 +47,18 @@ func runServer(c *Config) {
 	}
 	err := srv.ListenAndServe()
 	log.Fatal(err)
+}
+
+func generateContent(links []dbqueries.Link) []byte {
+
+	liElements := elem.TransformEach(links, func(link dbqueries.Link) elem.Node {
+		return elem.Div(attrs.Props{attrs.Class: "link-box"}, elem.A(attrs.Props{attrs.Href: link.Url}, elem.Text(link.Url)))
+	})
+
+	ulElement := elem.Ul(nil, liElements...)
+
+	content := elem.Div(nil, ulElement)
+	return []byte(content.Render())
 }
 
 // Links is the handler for /links.
@@ -99,16 +111,10 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 
 	// write the output like you normally do.
 	// check the inspector tool in the browser to see that the headers are set.
-	liElements := elem.TransformEach(links, func(link dbqueries.Link) elem.Node {
-		return elem.Li(nil, elem.Text(link.Url))
-	})
-
-	ulElement := elem.Ul(nil, liElements...)
-
-	content := elem.Div(attrs.Props{}, ulElement)
+	content := generateContent(links)
 
 	// _, _ = h.Write(byte[](returnString))
-	_, _ = h.Write([]byte(content.Render()))
+	_, _ = h.Write(content)
 }
 
 // Home is the handler for the home page; it is assumed that this is not
