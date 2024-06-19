@@ -65,6 +65,13 @@ var arg struct {
 	MarkdownReport  bool
 }
 
+// PeerInfo captures the information about a telegram peer
+type PeerInfo struct {
+	ID   int64
+	Name string
+	Type int64
+}
+
 // Storage is a wrapper aound the different storage types; these storage types were defined
 // in the original userbot all of this is based on but I'm still not sure if they are really
 // necessary here...
@@ -236,7 +243,7 @@ func extractURL(message string) (string, error) {
 		return "", errors.New("no urls found")
 	}
 	for _, url := range urls {
-		log.Printf("URL: %s", url)
+		lg.Sugar().Infof("URL: %s", url)
 	}
 	return urls[0], nil
 }
@@ -254,19 +261,19 @@ func getPageTitle(uri string) (string, error) {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		lg.Fatal(err.Error())
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		log.Printf("status code error: %d %s", res.StatusCode, res.Status)
+		lg.Sugar().Errorf("status code error: %d %s", res.StatusCode, res.Status)
 		return "", errors.New("invalid status code")
 	}
 
 	// Load the HTML document
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		log.Printf("error loading document: %v", err)
+		lg.Sugar().Errorf("error loading document: %v", err)
 		defer func() {
 			os.Exit(1)
 		}()
@@ -277,56 +284,7 @@ func getPageTitle(uri string) (string, error) {
 
 }
 
-// func printMessagesToFile(filename string, messagesClass tg.MessagesMessagesClass) error {
-// 	log.Printf("Writing messages to %s", filename)
-// 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-// 	if err != nil {
-// 		log.Printf("error opening file: %v", err)
-// 		return err
-// 	}
-// 	defer f.Close()
-// 	switch messages := messagesClass.(type) {
-// 	case *tg.MessagesMessages:
-// 		for _, mc := range messages.Messages {
-// 			switch m := mc.(type) {
-// 			case *tg.Message:
-// 				if containsURL(m.Message) {
-// 					messageURl, err := extractURL(m.Message)
-// 					if err != nil {
-// 						log.Printf("unable to extract url from message")
-// 					} else {
-// 						title, _ := getPageTitle(messageUrl)
-// 						fmt.Fprintf(f, "Date %v, FromID %v, MessageID %v, Url: %v, PageTitle: %v, Message %v\n\n", time.Unix(int64(m.Date), 0), m.FromID, m.ID, messageUrl, title, m.Message)
-// 					}
-// 				}
-// 			default:
-// 				log.Printf("unknown message class: %T", m)
-// 			}
-// 		}
-// 	case *tg.MessagesMessagesSlice:
-// 		for _, mc := range messages.Messages {
-// 			switch m := mc.(type) {
-// 			case *tg.Message:
-// 				if containsURL(m.Message) {
-// 					messageURL, err := extractURL(m.Message)
-// 					if err != nil {
-// 						log.Printf("unable to extract url from message")
-// 					} else {
-// 						title, _ := getPageTitle(messageUrl)
-// 						fmt.Fprintf(f, "Date %v, FromID %v, MessageID %v, Url: %v, PageTitle: %v, Message %v\n\n", time.Unix(int64(m.Date), 0), m.FromID, m.ID, messageUrl, title, m.Message)
-// 					}
-// 				}
-// 			default:
-// 				log.Printf("unknown message class: %T", m)
-// 			}
-// 		}
-// 	default:
-// 		log.Printf("unknown messagesmessages class: %T", messages)
-// 	}
-// 	return nil
-// }
-
-func storeMessage(ctx context.Context, db *sql.DB, message tg.Message) error {
+func storeMessage(ctx context.Context, db *sql.DB, message tg.Message, savedMessage bool) error {
 	queries := dbqueries.New(db)
 
 	_, err := queries.GetMessageByID(ctx, int64(message.ID))
@@ -337,15 +295,26 @@ func storeMessage(ctx context.Context, db *sql.DB, message tg.Message) error {
 		return ErrRowExists
 	}
 
+	var sentBy int64
+	if message.FromID == nil {
+		// this should only happen when this is a saved message
+		if !savedMessage {
+			lg.Sugar().Warn("warning: message FromID not specified and not in Saved Messages...")
+		}
+		sentBy = int64(message.PeerID.(*tg.PeerUser).UserID)
+	} else {
+		sentBy = int64(message.FromID.(*tg.PeerUser).UserID)
+
+	}
 	insertMessageParams := dbqueries.InsertMessageParams{
 		ID:      int64(message.ID),
 		SentAt:  int64(message.Date),
-		SentBy:  sql.NullString{},
+		SentBy:  sql.NullString{String: fmt.Sprintf("%d", sentBy), Valid: true},
 		Message: message.Message,
 	}
 	_, err = queries.InsertMessage(ctx, insertMessageParams)
 	if err != nil {
-		log.Printf("Error inserting message: %v", err)
+		lg.Sugar().Errorf("Error inserting message: %v", err)
 		return err
 
 	}
@@ -368,16 +337,18 @@ func storeLink(ctx context.Context, db *sql.DB, m tg.Message) error {
 			}
 			_, err = queries.InsertLink(ctx, insertLinkParams)
 			if err != nil {
-				log.Printf("Error inserting link: %v", err)
+				lg.Sugar().Warnf("Error inserting link: %v", err)
 			}
 		} else {
-			log.Printf("unable to extract url from message")
+			lg.Sugar().Warn("unable to extract url from message")
 		}
 	}
 	return nil
 }
-func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, db *sql.DB) error {
-	log.Printf("Storing messages in database %s", dbFilename)
+
+// storeSavedMessages stores saved messages; what is particular about Saved Messages is that they don't
+func storeSavedMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, db *sql.DB) error {
+	lg.Sugar().Infof("Storing messages in database %s", dbFilename)
 	// TODO: modify this to assume db is in the XDG_CONFIG_HOME directory
 
 	newMessagesStored := 0
@@ -386,7 +357,7 @@ func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, 
 		for _, mc := range messages.Messages {
 			switch m := mc.(type) {
 			case *tg.Message:
-				err := storeMessage(ctx, db, *m)
+				err := storeMessage(ctx, db, *m, true)
 				if err != nil && err != ErrRowExists {
 					return err
 				}
@@ -396,14 +367,14 @@ func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, 
 				_ = storeLink(ctx, db, *m)
 
 			default:
-				log.Printf("unknown message class: %T", m)
+				lg.Sugar().Warnf("unknown message class: %T", m)
 			}
 		}
 	case *tg.MessagesMessagesSlice:
 		for _, mc := range messages.Messages {
 			switch m := mc.(type) {
 			case *tg.Message:
-				err := storeMessage(ctx, db, *m)
+				err := storeMessage(ctx, db, *m, true)
 				if err != nil && err != ErrRowExists {
 					return err
 				}
@@ -412,13 +383,59 @@ func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, 
 				}
 				_ = storeLink(ctx, db, *m)
 			default:
-				log.Printf("unknown message class: %T", m)
+				lg.Sugar().Warnf("unknown message class: %T", m)
 			}
 		}
 	default:
-		log.Printf("unknown messagesmessages class: %T", messages)
+		lg.Sugar().Warnf("unknown messagesmessages class: %T", messages)
 	}
-	log.Printf("New messages stored: %v", newMessagesStored)
+	lg.Sugar().Infof("New messages stored: %v", newMessagesStored)
+	return nil
+}
+
+func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, db *sql.DB) error {
+	lg.Sugar().Infof("Storing messages in database %s", dbFilename)
+	// TODO: modify this to assume db is in the XDG_CONFIG_HOME directory
+
+	newMessagesStored := 0
+	switch messages := messagesClass.(type) {
+	case *tg.MessagesMessages:
+		for _, mc := range messages.Messages {
+			switch m := mc.(type) {
+			case *tg.Message:
+				err := storeMessage(ctx, db, *m, false)
+				if err != nil && err != ErrRowExists {
+					return err
+				}
+				if err == nil {
+					newMessagesStored++
+				}
+				_ = storeLink(ctx, db, *m)
+
+			default:
+				lg.Sugar().Warnf("unknown message class: %T", m)
+			}
+		}
+	case *tg.MessagesMessagesSlice:
+		for _, mc := range messages.Messages {
+			switch m := mc.(type) {
+			case *tg.Message:
+				err := storeMessage(ctx, db, *m, false)
+				if err != nil && err != ErrRowExists {
+					return err
+				}
+				if err == nil {
+					newMessagesStored++
+				}
+				_ = storeLink(ctx, db, *m)
+			default:
+				lg.Sugar().Warnf("unknown message class: %T", m)
+			}
+		}
+	default:
+		lg.Sugar().Warnf("unknown messagesmessages class: %T", messages)
+	}
+	lg.Sugar().Infof("New messages stored: %v", newMessagesStored)
 	return nil
 }
 
@@ -435,7 +452,7 @@ func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64, numM
 					maxOffset = int64(m.ID)
 				}
 			default:
-				log.Printf("unknown message class: %T", m)
+				lg.Sugar().Warnf("unknown message class: %T", m)
 			}
 		}
 	case *tg.MessagesMessagesSlice:
@@ -447,50 +464,51 @@ func getMaxOffset(messagesClass tg.MessagesMessagesClass) (maxOffset int64, numM
 					maxOffset = int64(m.ID)
 				}
 			default:
-				log.Printf("unknown message class: %T", m)
+				lg.Sugar().Warnf("unknown message class: %T", m)
 			}
 		}
 	}
 	return
 }
 
-func getUserDialogMessages(ctx context.Context, client *telegram.Client, p *tg.PeerUser,
+func getUserDialogMessages(ctx context.Context, client *telegram.Client, peerInfo PeerInfo,
 	db *sql.DB, lastSync time.Time) (messages tg.MessagesMessagesClass, err error) {
-	log.Printf("Dialog type User: getting user info for user = %v", p)
-	userRequest := tg.InputUser{UserID: p.UserID}
+	lg.Sugar().Infof("Dialog type User: getting user info for user = %v", peerInfo.ID)
+	userRequest := tg.InputUser{UserID: peerInfo.ID}
 	userInfo, err := client.API().UsersGetFullUser(ctx, &userRequest)
 	if err != nil {
-		log.Printf("error getting info for user: %v", err)
+		lg.Sugar().Errorf("error getting info for user: %v", err)
 		// this should really be an error but we ignore it for now...
 		return nil, nil
 	}
 	queries := dbqueries.New(db)
-	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, p.UserID)
+	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, peerInfo.ID)
 	if err != nil && err != sql.ErrNoRows {
-		log.Printf("error getting last update from db - ignoring...")
+		lg.Sugar().Error("error getting last update from db - ignoring...")
 	}
 	// assumes we get info on a single user (as this is what we asked for)
 	user := userInfo.Users[0].(*tg.User)
-	log.Printf("userinfo: (firstname, lastname) - (%v, %v)", user.FirstName, user.LastName)
-	log.Printf("Getting messages from dialog...")
+	lg.Sugar().Infof("userinfo: (firstname, lastname) - (%v, %v)", user.FirstName, user.LastName)
+	lg.Sugar().Info("Getting messages from dialog...")
 	peerUser := tg.InputPeerUser{UserID: user.ID}
 	searchRequest := tg.MessagesSearchRequest{
 		Peer:   &peerUser,
 		Limit:  100,
 		Filter: &tg.InputMessagesFilterURL{},
 		MinID:  int(lastUpdatePerUser.Int64),
-		//MinDate: int(lastSync.Unix()),
 	}
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	highestOffset, numMessages := getMaxOffset(messages)
 	if numMessages != 0 {
-		insertUserChatParams := dbqueries.InsertUserChatParams{
-			ID:         p.UserID,
+		insertDialogParams := dbqueries.InsertDialogParams{
+			ID:         peerInfo.ID,
 			LastUpdate: sql.NullInt64{Int64: highestOffset, Valid: true},
+			Name:       sql.NullString{String: peerInfo.Name, Valid: true},
+			Type:       sql.NullInt64{Int64: peerInfo.Type, Valid: true},
 		}
-		_, err = queries.InsertUserChat(ctx, insertUserChatParams)
+		_, err = queries.InsertDialog(ctx, insertDialogParams)
 		if err != nil {
-			log.Printf("error inserting user chat information: %v", err)
+			lg.Sugar().Errorf("error inserting user chat information: %v", err)
 			return
 		}
 	}
@@ -502,7 +520,7 @@ func getSavedMessages(ctx context.Context, client *telegram.Client, db *sql.DB, 
 	queries := dbqueries.New(db)
 	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, userID)
 	if err != nil && err != sql.ErrNoRows {
-		log.Printf("error getting last update from db - ignoring...")
+		lg.Sugar().Error("error getting last update from db - ignoring...")
 	}
 
 	peerUser := tg.InputPeerUser{UserID: userID}
@@ -515,18 +533,19 @@ func getSavedMessages(ctx context.Context, client *telegram.Client, db *sql.DB, 
 	}
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	if err != nil {
-		log.Printf("error getting messages: %v", err)
+		lg.Sugar().Errorf("error getting messages: %v", err)
 		return nil, err
 	}
 	highestOffset, numMessages := getMaxOffset(messages)
 	if numMessages != 0 {
-		insertUserChatParams := dbqueries.InsertUserChatParams{
+		insertDialogParams := dbqueries.InsertDialogParams{
 			ID:         userID,
 			LastUpdate: sql.NullInt64{Int64: highestOffset, Valid: true},
+			Name:       sql.NullString{String: "some name", Valid: true},
 		}
-		_, err = queries.InsertUserChat(ctx, insertUserChatParams)
+		_, err = queries.InsertDialog(ctx, insertDialogParams)
 		if err != nil {
-			log.Printf("error inserting user chat information: %v", err)
+			lg.Sugar().Errorf("error inserting user chat information: %v", err)
 			return
 		}
 	}
@@ -552,37 +571,37 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 	}
 	switch dialogs.TypeID() {
 	case tg.MessagesDialogsTypeID:
-		log.Println()
+		lg.Info("\n")
 		darray := dialogs.(*tg.MessagesDialogs)
 		for _, d := range darray.Dialogs {
 			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db, lastSync)
 			if err != nil {
-				log.Printf("error getting messages: %v", err)
+				lg.Sugar().Errorf("error getting messages: %v", err)
 				return nil, err
 			}
 			if messagesPerDialog != nil {
-				utils.PrintMessages(messages)
+				utils.PrintMessages(messages, false)
 				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
 	case tg.MessagesDialogsSliceTypeID:
-		log.Printf("messagesdialogsslice")
+		lg.Sugar().Info("messagesdialogsslice")
 		darray := dialogs.(*tg.MessagesDialogsSlice)
 		for _, d := range darray.Dialogs {
 			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db, lastSync)
 			if err != nil {
-				log.Printf("error getting messages: %v", err)
+				lg.Sugar().Errorf("error getting messages: %v", err)
 				return nil, err
 			}
 			if messagesPerDialog != nil {
-				utils.PrintMessages(messagesPerDialog)
+				utils.PrintMessages(messagesPerDialog, false)
 				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
 	case tg.MessagesDialogsNotModifiedTypeID:
-		log.Printf("not modified")
+		lg.Sugar().Warn("not modified")
 	default:
-		log.Printf("no clue")
+		lg.Sugar().Warn("no clue")
 	}
 	return
 }
@@ -630,11 +649,32 @@ func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.Dia
 	peer := d.GetPeer()
 	switch p := peer.(type) {
 	case *tg.PeerUser:
-		messages, err = getUserDialogMessages(ctx, client, p, db, lastSync)
+		userRequest := tg.InputUser{UserID: p.UserID}
+		userInfo, err := client.API().UsersGetFullUser(ctx, &userRequest)
+		if err != nil {
+			lg.Sugar().Errorf("error getting info for user: %v", err)
+			// this should really be an error but we ignore it for now...
+			return nil, nil
+		}
+		user := userInfo.Users[0].(*tg.User)
+		name := user.FirstName
+		if name == "" {
+			lg.Sugar().Warnf("error specifying username - user has no first name")
+			name = "Unknown"
+		}
+		if user.LastName != "" {
+			name = name + " " + user.LastName
+		}
+		peerInfo := PeerInfo{
+			ID:   p.UserID,
+			Name: name,
+			Type: tg.PeerUserTypeID,
+		}
+		messages, err = getUserDialogMessages(ctx, client, peerInfo, db, lastSync)
 	case *tg.PeerChat:
-		log.Printf("Dialog type chat = %v - ignoring...", p)
+		lg.Sugar().Infof("Dialog type chat = %v - ignoring...", p)
 	case *tg.PeerChannel:
-		log.Printf("Dialog type channel = %v - ignoring...", p)
+		lg.Sugar().Infof("Dialog type channel = %v - ignoring...", p)
 		// channelRequest := tg.InputChannel{ChannelID: p.ChannelID}
 		// channelInfo, err := client.API().ChannelsGetFullChannel(ctx, &channelRequest)
 		// if err != nil {
@@ -645,18 +685,18 @@ func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.Dia
 		// channel := channelInfo.[0].(*tg.User)
 		// log.Printf("channel info -  %v", channelInfo)
 	default:
-		log.Printf("unknown peer type = %v - ignoring...", peer)
+		lg.Sugar().Warnf("unknown peer type = %v - ignoring...", peer)
 	}
 	return
 }
 
-func run(ctx context.Context, c *Config, lastSync time.Time) error {
-	s, err := initializeStorage(c)
-	if err != nil {
-		return errors.Wrap(err, "initialize storage")
-	}
-	lg := createLogger(s.LogFilePath)
-	defer func() { _ = lg.Sync() }()
+func run(ctx context.Context, c *Config, s *Storage, lastSync time.Time) error {
+	// s, err := initializeStorage(c)
+	// if err != nil {
+	// 	return errors.Wrap(err, "initialize storage")
+	// }
+	// lg := createLogger(s.LogFilePath)
+	// defer func() { _ = lg.Sync() }()
 
 	peerDB := pebble.NewPeerStorage(s.DB)
 	lg.Info("Storage", zap.String("path", s.SessionDir))
@@ -710,13 +750,13 @@ func run(ctx context.Context, c *Config, lastSync time.Time) error {
 			dbFullFilename := filepath.Join(c.TgleStateDirectory, dbFilename)
 			db, err := sql.Open("sqlite3", dbFullFilename)
 			if err != nil {
-				log.Printf("error opening database: %v", err)
+				lg.Sugar().Errorf("error opening database: %v", err)
 				return err
 			}
 
 			// create tables
 			if _, err = db.ExecContext(ctx, ddl); err != nil {
-				log.Printf("error creating db tables: %v", err)
+				lg.Sugar().Errorf("error creating db tables: %v", err)
 				return err
 			}
 			defer db.Close()
@@ -727,10 +767,10 @@ func run(ctx context.Context, c *Config, lastSync time.Time) error {
 				return errors.Wrap(err, "error getting saved messages")
 			}
 			if messages != nil {
-				utils.PrintMessages(messages)
-				_ = storeMessages(ctx, messages, db)
+				utils.PrintMessages(messages, false)
+				_ = storeSavedMessages(ctx, messages, db)
 			} else {
-				log.Printf("no messages received...")
+				lg.Sugar().Info("no messages received...")
 
 			}
 
@@ -771,13 +811,13 @@ func run(ctx context.Context, c *Config, lastSync time.Time) error {
 func writeSyncRecord(ctx context.Context, c *Config) error {
 	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
 	if err != nil {
-		log.Printf("error opening database: %v", err)
+		lg.Sugar().Errorf("error opening database: %v", err)
 		return err
 	}
 
 	// create tables
 	if _, err = db.ExecContext(ctx, ddl); err != nil {
-		log.Printf("error creating db tables: %v", err)
+		lg.Sugar().Errorf("error creating db tables: %v", err)
 		return err
 	}
 	defer db.Close()
@@ -789,7 +829,7 @@ func writeSyncRecord(ctx context.Context, c *Config) error {
 	}
 	_, err = queries.AddTGSync(ctx, addTGSyncParams)
 	if err != nil {
-		log.Printf("error adding sync record: %v", err)
+		lg.Sugar().Errorf("error adding sync record: %v", err)
 		return err
 	}
 	return nil
@@ -798,13 +838,13 @@ func writeSyncRecord(ctx context.Context, c *Config) error {
 func getLastSyncTime(ctx context.Context, c *Config) (*dbqueries.TgleSync, error) {
 	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
 	if err != nil {
-		log.Printf("error opening database: %v", err)
+		lg.Sugar().Errorf("error opening database: %v", err)
 		return nil, err
 	}
 
 	// create tables
 	if _, err = db.ExecContext(ctx, ddl); err != nil {
-		log.Printf("error creating db tables: %v", err)
+		lg.Sugar().Errorf("error creating db tables: %v", err)
 		return nil, err
 	}
 	defer db.Close()
@@ -816,7 +856,7 @@ func getLastSyncTime(ctx context.Context, c *Config) (*dbqueries.TgleSync, error
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		log.Printf("error getting last sync record: %v", err)
+		lg.Sugar().Errorf("error getting last sync record: %v", err)
 		return nil, err
 	}
 	return &lastSyncRecord, nil
@@ -844,13 +884,22 @@ func validateArgs() (bool, error) {
 func main() {
 	validArgs, err := validateArgs()
 	if !validArgs {
-		log.Fatalf("invalid arguments: %v - exiting...", err)
+		log.Fatalf("invalid arguments: %v - exiting...", err.Error())
+		os.Exit(1)
 	}
 
 	c, err := readConfig()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("error reading config file: %v - exiting...", err.Error())
+		os.Exit(1)
 	}
+
+	s, err := initializeStorage(c)
+	if err != nil {
+		log.Fatalf("error initializing storage %v - exiting...", err.Error())
+	}
+	lg := createLogger(s.LogFilePath)
+	defer func() { _ = lg.Sync() }()
 
 	switch {
 	case arg.ServerMode:
@@ -875,7 +924,7 @@ func main() {
 	}
 	fmt.Printf("last sync time: %v\n", lastSync)
 
-	if err := run(ctx, c, lastSync); err != nil {
+	if err := run(ctx, c, s, lastSync); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
 			fmt.Println("\rClosed")
 			defer func() {

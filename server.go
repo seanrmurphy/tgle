@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/dustin/go-humanize"
 
 	"github.com/chasefleming/elem-go"
 	"github.com/chasefleming/elem-go/attrs"
@@ -36,7 +37,7 @@ func runServer(c *Config) {
 	mux.Handle("/", middleware.MiddleWare(http.HandlerFunc(app.Home)))
 	mux.Handle("/links", middleware.MiddleWare(http.HandlerFunc(app.Links)))
 
-	log.Printf("running server on port 3000...")
+	lg.Sugar().Info("running server on port 3000...")
 	srv := &http.Server{
 		Addr:              ":3000",
 		ReadTimeout:       1 * time.Second,
@@ -46,12 +47,12 @@ func runServer(c *Config) {
 		Handler:           mux,
 	}
 	err := srv.ListenAndServe()
-	log.Fatal(err)
+	lg.Fatal(err.Error())
 }
 
-func generateContent(links []dbqueries.Link) []byte {
+func generateContent(links []dbqueries.GetLinksWithSenderRow) []byte {
 
-	liElements := elem.TransformEach(links, func(link dbqueries.Link) elem.Node {
+	liElements := elem.TransformEach(links, func(link dbqueries.GetLinksWithSenderRow) elem.Node {
 
 		// TODO: Should change this such that there is a sensible link title in the db
 		// for twitter links
@@ -59,9 +60,17 @@ func generateContent(links []dbqueries.Link) []byte {
 		if link.PageTitle.String == "" || link.PageTitle.String == "x.com" {
 			linkText = link.Url
 		}
+		sentBy := "not defined"
+		if link.SentBy.Valid {
+			sentBy = link.SentBy.String
+		}
+		sentAt := humanize.Time(time.Unix(link.SentAt, 0))
 		return elem.Div(attrs.Props{attrs.Class: "link-box"},
-			elem.A(attrs.Props{attrs.Class: "link-text", attrs.Href: link.Url},
-				elem.Text(linkText)))
+			elem.Div(attrs.Props{attrs.Class: "link-text"}, elem.A(attrs.Props{attrs.Class: "link-text", attrs.Href: link.Url}, elem.Text(linkText))),
+			elem.Div(attrs.Props{attrs.Class: "link-subtext"},
+				elem.Div(attrs.Props{attrs.Class: "link-subtext-left"}, elem.Text("Sent by: "+sentBy)),
+				elem.Div(attrs.Props{attrs.Class: "link-subtext-right"}, elem.Text("Sent: "+sentAt))))
+
 	})
 
 	ulElement := elem.Ul(nil, liElements...)
@@ -78,7 +87,7 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 	dbFullFilename := filepath.Join(a.config.TgleStateDirectory, dbFilename)
 	db, err := sql.Open("sqlite3", dbFullFilename)
 	if err != nil {
-		log.Printf("error opening database: %v", err)
+		lg.Sugar().Errorf("error opening database: %v", err)
 		content := elem.Div(attrs.Props{}, elem.P(attrs.Props{}, elem.Text("unable to open database")))
 		// _, _ = h.Write(byte[](returnString))
 		_, _ = h.Write([]byte(content.Render()))
@@ -89,9 +98,9 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 
 	queries := dbqueries.New(db)
 
-	links, err := queries.GetLinks(context.TODO())
+	links, err := queries.GetLinksWithSender(context.TODO())
 	if err != nil {
-		log.Printf("error getting links: %v", err)
+		lg.Sugar().Errorf("error getting links: %v", err)
 
 		swap := htmx.NewSwap().Swap(time.Second * 2).ScrollBottom()
 
@@ -108,7 +117,7 @@ func (a *App) Links(w http.ResponseWriter, r *http.Request) {
 	// check if the request is a htmx request
 	// TODO: add logic to deal with case that this is not a htmx request
 	if h.IsHxRequest() {
-		log.Printf("htmx request - %v", h.Request())
+		lg.Sugar().Infof("htmx request - %v", h.Request())
 	}
 
 	// set the headers for the response, see docs for more options
@@ -137,7 +146,7 @@ func (a *App) Home(w http.ResponseWriter, r *http.Request) {
 	// TODO: add logic to deal with case that this is not a htmx request
 	if h.IsHxRequest() {
 		// do something
-		log.Printf("htmx request - %v", h.Request())
+		lg.Sugar().Infof("htmx request - %v", h.Request())
 	}
 
 	// set the headers for the response, see docs for more options

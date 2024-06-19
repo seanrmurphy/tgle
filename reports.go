@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"path/filepath"
 	"time"
 
@@ -13,11 +12,11 @@ import (
 )
 
 func generateJSONReport(c *Config) error {
-	log.Printf("Generating JSON report\n")
+	lg.Sugar().Info("Generating JSON report\n")
 
 	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
 	if err != nil {
-		log.Printf("error opening database: %v", err)
+		lg.Sugar().Errorf("error opening database: %v", err)
 		return err
 	}
 
@@ -25,7 +24,7 @@ func generateJSONReport(c *Config) error {
 
 	recentLinks, err := queries.GetLinks(context.TODO())
 	if err != nil {
-		log.Printf("error getting links: %v", err)
+		lg.Sugar().Error("error getting links: %v", err)
 		return err
 	}
 
@@ -37,11 +36,11 @@ func generateJSONReport(c *Config) error {
 }
 
 func generateMarkdownReport(c *Config) error {
-	log.Printf("Generating markdown report\n")
+	lg.Sugar().Info("Generating markdown report\n")
 
 	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
 	if err != nil {
-		log.Printf("error opening database: %v", err)
+		lg.Sugar().Error("error opening database: %v", err)
 		return err
 	}
 
@@ -49,7 +48,7 @@ func generateMarkdownReport(c *Config) error {
 
 	recentLinks, err := queries.GetLinks(context.TODO())
 	if err != nil {
-		log.Printf("error getting links: %v", err)
+		lg.Sugar().Error("error getting links: %v", err)
 		return err
 	}
 

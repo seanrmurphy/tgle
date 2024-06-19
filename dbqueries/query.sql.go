@@ -76,7 +76,7 @@ func (q *Queries) GetLastTGSync(ctx context.Context) (TgleSync, error) {
 }
 
 const getLastUpdateByUser = `-- name: GetLastUpdateByUser :one
-SELECT last_update FROM user_chats
+SELECT last_update FROM dialogs
 WHERE id = ?
 LIMIT 1
 `
@@ -110,6 +110,52 @@ func (q *Queries) GetLinks(ctx context.Context) ([]Link, error) {
 			&i.Site,
 			&i.PageTitle,
 			&i.Tags,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLinksWithSender = `-- name: GetLinksWithSender :many
+SELECT l.id, l.url, l.page_title, m.sent_at, m.sent_by
+FROM links l
+INNER JOIN messages m
+ON l.id = m.id
+ORDER BY m.sent_at DESC
+LIMIT 50
+`
+
+type GetLinksWithSenderRow struct {
+	ID        int64
+	Url       string
+	PageTitle sql.NullString
+	SentAt    int64
+	SentBy    sql.NullString
+}
+
+func (q *Queries) GetLinksWithSender(ctx context.Context) ([]GetLinksWithSenderRow, error) {
+	rows, err := q.db.QueryContext(ctx, getLinksWithSender)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinksWithSenderRow
+	for rows.Next() {
+		var i GetLinksWithSenderRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Url,
+			&i.PageTitle,
+			&i.SentAt,
+			&i.SentBy,
 		); err != nil {
 			return nil, err
 		}
@@ -173,6 +219,44 @@ func (q *Queries) GetMessages(ctx context.Context) ([]Message, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const insertDialog = `-- name: InsertDialog :one
+INSERT INTO dialogs (
+    id,
+    last_update,
+    name,
+    type
+
+) VALUES (
+  ?, ?, ?, ?
+)
+ON CONFLICT (id) DO UPDATE SET last_update=excluded.last_update
+RETURNING id, last_update, name, type
+`
+
+type InsertDialogParams struct {
+	ID         int64
+	LastUpdate sql.NullInt64
+	Name       sql.NullString
+	Type       sql.NullInt64
+}
+
+func (q *Queries) InsertDialog(ctx context.Context, arg InsertDialogParams) (Dialog, error) {
+	row := q.db.QueryRowContext(ctx, insertDialog,
+		arg.ID,
+		arg.LastUpdate,
+		arg.Name,
+		arg.Type,
+	)
+	var i Dialog
+	err := row.Scan(
+		&i.ID,
+		&i.LastUpdate,
+		&i.Name,
+		&i.Type,
+	)
+	return i, err
 }
 
 const insertLink = `-- name: InsertLink :one
@@ -252,28 +336,5 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (M
 		&i.SentBy,
 		&i.Message,
 	)
-	return i, err
-}
-
-const insertUserChat = `-- name: InsertUserChat :one
-INSERT INTO user_chats (
-    id,
-    last_update
-) VALUES (
-  ?, ?
-)
-ON CONFLICT (id) DO UPDATE SET last_update=excluded.last_update
-RETURNING id, last_update
-`
-
-type InsertUserChatParams struct {
-	ID         int64
-	LastUpdate sql.NullInt64
-}
-
-func (q *Queries) InsertUserChat(ctx context.Context, arg InsertUserChatParams) (UserChat, error) {
-	row := q.db.QueryRowContext(ctx, insertUserChat, arg.ID, arg.LastUpdate)
-	var i UserChat
-	err := row.Scan(&i.ID, &i.LastUpdate)
 	return i, err
 }

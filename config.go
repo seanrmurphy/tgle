@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/pterm/pterm"
 
 	"github.com/adrg/xdg"
 	"github.com/go-faster/errors"
@@ -61,25 +61,20 @@ func readConfig() (cfg *Config, err error) {
 	// check if a config file exists in XDG_CONFIG_HOME
 	configFilePath, err := xdg.ConfigFile(ApplicationName + "/config.toml")
 	if err != nil {
-		log.Fatal(err)
+		lg.Fatal(err.Error())
 	}
 
 	if _, err := os.Stat(configFilePath); err == nil {
 		return readConfigFile(configFilePath)
 	} else if errors.Is(err, os.ErrNotExist) {
-		fmt.Printf("No configuration exists - need to create one...\n")
+		pterm.Info.Print("No configuration exists - need to create one...\n")
+		pterm.Println()
 
-		fmt.Println("enter telegram phone number: (use format +1234567890): ")
-		var phoneNumber string
-		_, _ = fmt.Scanln(&phoneNumber)
+		phoneNumber, _ := pterm.DefaultInteractiveTextInput.Show("enter telegram phone number - (use format +1234567890)")
 
-		fmt.Println("enter telegram app id: ")
-		var appID string
-		_, _ = fmt.Scanln(&appID)
+		appID, _ := pterm.DefaultInteractiveTextInput.Show("enter telegram app id")
 
-		fmt.Println("enter telegram app hash: ")
-		var appHash string
-		_, _ = fmt.Scanln(&appHash)
+		appHash, _ := pterm.DefaultInteractiveTextInput.Show("enter telegram app hash")
 
 		TgleStateDirectory := xdg.StateHome + "/" + ApplicationName
 
@@ -91,7 +86,7 @@ func readConfig() (cfg *Config, err error) {
 		}
 		err := writeConfig(configFilePath, *cfg)
 		if err != nil {
-			log.Printf("error writing config file: %v", err)
+			lg.Sugar().Error("error writing config file: %v", err)
 			return nil, err
 		}
 		return cfg, nil

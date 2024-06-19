@@ -13,7 +13,7 @@ WHERE id = ?
 LIMIT 1;
 
 -- name: GetLastUpdateByUser :one
-SELECT last_update FROM user_chats
+SELECT last_update FROM dialogs
 WHERE id = ?
 LIMIT 1;
 
@@ -41,12 +41,15 @@ INSERT INTO messages (
 )
 RETURNING *;
 
--- name: InsertUserChat :one
-INSERT INTO user_chats (
+-- name: InsertDialog :one
+INSERT INTO dialogs (
     id,
-    last_update
+    last_update,
+    name,
+    type
+
 ) VALUES (
-  ?, ?
+  ?, ?, ?, ?
 )
 ON CONFLICT (id) DO UPDATE SET last_update=excluded.last_update
 RETURNING *;
@@ -70,3 +73,11 @@ INSERT INTO tgle_sync (
   ?, ?, ?
 )
 RETURNING *;
+
+-- name: GetLinksWithSender :many
+SELECT l.id, l.url, l.page_title, m.sent_at, m.sent_by
+FROM links l
+INNER JOIN messages m
+ON l.id = m.id
+ORDER BY m.sent_at DESC
+LIMIT 50;

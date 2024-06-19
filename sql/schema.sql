@@ -15,9 +15,11 @@ CREATE TABLE IF NOT EXISTS messages (
     message TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS user_chats (
+CREATE TABLE IF NOT EXISTS dialogs (
     id INTEGER PRIMARY KEY,
-    last_update INTEGER
+    last_update INTEGER,
+    name TEXT,
+    type INTEGER
 );
 
 -- this performs an update on the last time a sync
