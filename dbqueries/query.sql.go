@@ -75,6 +75,24 @@ func (q *Queries) GetLastTGSync(ctx context.Context) (TgleSync, error) {
 	return i, err
 }
 
+const getLastUpdateByPeer = `-- name: GetLastUpdateByPeer :one
+SELECT last_update FROM dialogs
+WHERE (id = ? AND type = ?)
+LIMIT 1
+`
+
+type GetLastUpdateByPeerParams struct {
+	ID   int64
+	Type sql.NullInt64
+}
+
+func (q *Queries) GetLastUpdateByPeer(ctx context.Context, arg GetLastUpdateByPeerParams) (sql.NullInt64, error) {
+	row := q.db.QueryRowContext(ctx, getLastUpdateByPeer, arg.ID, arg.Type)
+	var last_update sql.NullInt64
+	err := row.Scan(&last_update)
+	return last_update, err
+}
+
 const getLastUpdateByUser = `-- name: GetLastUpdateByUser :one
 SELECT last_update FROM dialogs
 WHERE id = ?

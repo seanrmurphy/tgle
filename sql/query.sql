@@ -17,6 +17,11 @@ SELECT last_update FROM dialogs
 WHERE id = ?
 LIMIT 1;
 
+-- name: GetLastUpdateByPeer :one
+SELECT last_update FROM dialogs
+WHERE (id = ? AND type = ?)
+LIMIT 1;
+
 -- name: InsertLink :one
 INSERT INTO links (
     id,
