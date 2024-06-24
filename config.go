@@ -24,7 +24,7 @@ type Config struct {
 	TelegramAppHash     string
 }
 
-func readConfigFile(configFilePath string) (cfg *Config, err error) {
+func readConfigFromFile(configFilePath string) (cfg *Config, err error) {
 	configFilePath = filepath.Clean(configFilePath)
 	fileContent, err := os.ReadFile(configFilePath)
 	if err != nil {
@@ -35,10 +35,10 @@ func readConfigFile(configFilePath string) (cfg *Config, err error) {
 	if err != nil {
 		return cfg, errors.Wrap(err, "unable to parse config file")
 	}
-	return cfg, nil
+	return
 }
 
-func writeConfig(configFilePath string, cfg Config) error {
+func (cfg Config) writeToFile(configFilePath string) error {
 	configFilePath = filepath.Clean(configFilePath)
 	file, err := os.Create(configFilePath)
 	if err != nil {
@@ -52,11 +52,11 @@ func writeConfig(configFilePath string, cfg Config) error {
 	return nil
 }
 
-// readConfig reads the config file and returns it in a config struct.
+// readOrGenerateConfig reads the config file and returns it in a config struct.
 // in the initial version, we check if the config file exists in XDG_CONFIG_HOME;
 // if so, we read it. If not, we create a new one based on user input.
 // We don't support user variables at this time.
-func readConfig() (cfg *Config, err error) {
+func readOrGenerateConfig() (cfg *Config, err error) {
 
 	// check if a config file exists in XDG_CONFIG_HOME
 	configFilePath, err := xdg.ConfigFile(ApplicationName + "/config.toml")
@@ -65,7 +65,7 @@ func readConfig() (cfg *Config, err error) {
 	}
 
 	if _, err := os.Stat(configFilePath); err == nil {
-		return readConfigFile(configFilePath)
+		return readConfigFromFile(configFilePath)
 	} else if errors.Is(err, os.ErrNotExist) {
 		pterm.Info.Print("No configuration exists - need to create one...\n")
 		pterm.Println()
@@ -84,7 +84,7 @@ func readConfig() (cfg *Config, err error) {
 			TelegramAppID:       appID,
 			TelegramAppHash:     appHash,
 		}
-		err := writeConfig(configFilePath, *cfg)
+		err := cfg.writeToFile(configFilePath)
 		if err != nil {
 			lg.Sugar().Error("error writing config file: %v", err)
 			return nil, err

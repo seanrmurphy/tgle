@@ -54,6 +54,7 @@ var arg struct {
 }
 
 func parseArguments() {
+	// TODO: figure out what to do with the fill peer storage
 	flag.BoolVar(&arg.FillPeerStorage, "fill-peer-storage", false, "fill peer storage")
 	flag.BoolVar(&arg.ServerMode, "server", false, "enable server mode")
 	flag.BoolVar(&arg.JSONReport, "json", false, "generate link report in JSON format")
@@ -262,7 +263,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := readConfig()
+	c, err := readOrGenerateConfig()
 	if err != nil {
 		log.Fatalf("error reading config file: %v - exiting...", err.Error())
 		os.Exit(1)

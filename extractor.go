@@ -22,30 +22,43 @@ import (
 )
 
 func getMessages(ctx context.Context, client *telegram.Client, db *sql.DB, self *tg.User) error {
-
 	// first get Saved Messages - messages a user sends to themselves
-	messages, err := getSavedMessages(ctx, client, db, self.ID)
-	pterm.DefaultBasicText.Printf("Getting links from Saved Messages...\n")
+	gettimgMessagesString := "Getting Saved Messages"
+	spinner, _ := pterm.DefaultSpinner.Start(gettimgMessagesString)
+	messagesFromSaveMessages, err := getSavedMessages(ctx, client, db, self.ID)
 	if err != nil {
 		return errors.Wrap(err, "error getting saved messages")
 	}
-	if messages != nil {
-		utils.PrintMessages(messages, false, lg)
-		_ = storeSavedMessages(ctx, messages, db)
+	var messages []tg.MessageClass
+	switch messagesWrapper := messagesFromSaveMessages.(type) {
+	case *tg.MessagesMessages:
+		messages = messagesWrapper.Messages
+	case *tg.MessagesMessagesSlice:
+		messages = messagesWrapper.Messages
+	default:
+		lg.Sugar().Errorf("unexpected type: %T", messagesWrapper)
+		return errors.Errorf("unexpected type: %T", messagesWrapper)
+	}
+	numMessages := len(messages)
+	finalMessagesString := fmt.Sprintf("%v...(%v messages received)", gettimgMessagesString, numMessages)
+	spinner.Info(finalMessagesString)
+	if messagesFromSaveMessages != nil {
+		utils.PrintMessages(messagesFromSaveMessages, false, lg)
+		_ = storeSavedMessages(ctx, messagesFromSaveMessages, db)
 	} else {
 		lg.Sugar().Info("no messages received...")
 	}
 
 	// next, get messages from user dialogs...
 	// uncomment below when it seems to work...
-	messages, err = getMessagesFromUserDialogs(ctx, client, self.ID, db)
+	_, err = getMessagesFromDialogs(ctx, client, self.ID, db)
 	if err != nil {
 		return errors.Wrap(err, "error getting messages from user dialogs")
 	}
 	return nil
 }
 
-func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, userID int64, db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
+func getMessagesFromDialogs(ctx context.Context, client *telegram.Client, userID int64, db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
 	api := client.API()
 	request := tg.MessagesGetDialogsRequest{
 		Flags:         0,
@@ -62,12 +75,12 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 		lg.Sugar().Errorf("Error: %+v\n", err)
 		return nil, errors.Wrap(err, "error getting dialogs")
 	}
+	// TODO: consolidate the logic below to reduce duplication
 	switch dialogs.TypeID() {
 	case tg.MessagesDialogsTypeID:
-		lg.Info("\n")
 		darray := dialogs.(*tg.MessagesDialogs)
 		for _, d := range darray.Dialogs {
-			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db)
+			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db, userID)
 			if err != nil {
 				lg.Sugar().Errorf("error getting messages: %v", err)
 				return nil, err
@@ -81,7 +94,7 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 		lg.Sugar().Info("messagesdialogsslice")
 		darray := dialogs.(*tg.MessagesDialogsSlice)
 		for _, d := range darray.Dialogs {
-			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db)
+			messagesPerDialog, err := getMessagesPerDialog(ctx, client, d, db, userID)
 			if err != nil {
 				lg.Sugar().Errorf("error getting messages: %v", err)
 				return nil, err
@@ -123,7 +136,9 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, userID 
 		Name: name,
 		Type: tg.PeerUserTypeID,
 	}
-	pterm.DefaultBasicText.Printf("Getting messages from user %v...\n", name)
+	gettimgMessagesString := fmt.Sprintf("Getting messages from user %v", name)
+	spinner, _ := pterm.DefaultSpinner.Start(gettimgMessagesString)
+
 	queries := dbqueries.New(db)
 	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, peerInfo.ID)
 	if err != nil && err != sql.ErrNoRows {
@@ -140,6 +155,8 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, userID 
 	}
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	highestOffset, numMessages := getMaxOffset(messages)
+	finalMessagesString := fmt.Sprintf("%v...(%v messages received)", gettimgMessagesString, numMessages)
+	spinner.Info(finalMessagesString)
 	if numMessages != 0 {
 		insertDialogParams := dbqueries.InsertDialogParams{
 			ID:         peerInfo.ID,
@@ -194,11 +211,13 @@ func getSavedMessages(ctx context.Context, client *telegram.Client, db *sql.DB, 
 }
 
 func getMessagesPerDialog(ctx context.Context, client *telegram.Client, d tg.DialogClass,
-	db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
+	db *sql.DB, userID int64) (messages tg.MessagesMessagesClass, err error) {
 	peer := d.GetPeer()
 	switch p := peer.(type) {
 	case *tg.PeerUser:
-		messages, err = getUserDialogMessages(ctx, client, p.UserID, db)
+		if p.UserID != userID { // this is the Saved Message case which is handled separately
+			messages, err = getUserDialogMessages(ctx, client, p.UserID, db)
+		}
 	case *tg.PeerChat:
 		messages, err = getChatDialogMessages(ctx, client, p.ChatID, db)
 	case *tg.PeerChannel:
@@ -327,9 +346,9 @@ func storeLink(ctx context.Context, db *sql.DB, m tg.Message) error {
 // storeSavedMessages stores saved messages; what is particular about Saved Messages is that they don't
 func storeSavedMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, db *sql.DB) error {
 	lg.Sugar().Infof("Storing messages in database %s", dbFilename)
-	// TODO: modify this to assume db is in the XDG_CONFIG_HOME directory
 
 	newMessagesStored := 0
+	// TODO: consolidate the fbllowing to reduce duplication
 	switch messages := messagesClass.(type) {
 	case *tg.MessagesMessages:
 		for _, mc := range messages.Messages {
@@ -373,9 +392,9 @@ func storeSavedMessages(ctx context.Context, messagesClass tg.MessagesMessagesCl
 
 func storeMessages(ctx context.Context, messagesClass tg.MessagesMessagesClass, db *sql.DB) error {
 	lg.Sugar().Infof("Storing messages in database %s", dbFilename)
-	// TODO: modify this to assume db is in the XDG_CONFIG_HOME directory
 
 	newMessagesStored := 0
+	// TODO: consolidate the fbllowing to reduce duplication
 	switch messages := messagesClass.(type) {
 	case *tg.MessagesMessages:
 		for _, mc := range messages.Messages {
@@ -464,7 +483,8 @@ func getChatDialogMessages(ctx context.Context, client *telegram.Client, chatID 
 		Name: chat.Title,
 		Type: tg.PeerChatTypeID,
 	}
-	pterm.DefaultBasicText.Printf("Getting messages for chat: %v\n", chat.Title)
+	gettimgMessagesString := fmt.Sprintf("Getting messages for chat %v", chat.Title)
+	spinner, _ := pterm.DefaultSpinner.Start(gettimgMessagesString)
 	queries := dbqueries.New(db)
 	getLastUpdatebyPeerParams := dbqueries.GetLastUpdateByPeerParams{
 		ID:   peerInfo.ID,
@@ -487,6 +507,8 @@ func getChatDialogMessages(ctx context.Context, client *telegram.Client, chatID 
 	}
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	highestOffset, numMessages := getMaxOffset(messages)
+	finalMessagesString := fmt.Sprintf("%v...(%v messages received)", gettimgMessagesString, numMessages)
+	spinner.Info(finalMessagesString)
 	if numMessages != 0 {
 		insertDialogParams := dbqueries.InsertDialogParams{
 			ID:         peerInfo.ID,
