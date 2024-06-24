@@ -18,6 +18,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/pelletier/go-toml/v2 v2.0.5
 	github.com/pterm/pterm v0.12.79
+	github.com/stretchr/testify v1.9.0
 	go.etcd.io/bbolt v1.3.10
 	go.uber.org/zap v1.27.0
 	golang.org/x/time v0.5.0
@@ -38,6 +39,7 @@ require (
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
 	github.com/containerd/console v1.0.3 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/getsentry/sentry-go v0.18.0 // indirect
 	github.com/go-faster/jx v1.1.0 // indirect
 	github.com/go-faster/xor v1.0.0 // indirect
@@ -52,6 +54,7 @@ require (
 	github.com/lithammer/fuzzysearch v1.1.8 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.19.0 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
@@ -72,6 +75,7 @@ require (
 	golang.org/x/term v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	nhooyr.io/websocket v1.8.11 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

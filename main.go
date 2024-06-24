@@ -53,7 +53,7 @@ var arg struct {
 	RemoveState     bool
 }
 
-func init() {
+func parseArguments() {
 	flag.BoolVar(&arg.FillPeerStorage, "fill-peer-storage", false, "fill peer storage")
 	flag.BoolVar(&arg.ServerMode, "server", false, "enable server mode")
 	flag.BoolVar(&arg.JSONReport, "json", false, "generate link report in JSON format")
@@ -154,9 +154,9 @@ func run(ctx context.Context, c *Config, s *Storage) error {
 			name := self.FirstName
 			if self.Username != "" {
 				// Username is optional.
-				name = fmt.Sprintf("%s (@%s), %v", name, self.Username, self.ID)
+				name = fmt.Sprintf("%s (handle: @%s, id: %v)", name, self.Username, self.ID)
 			}
-			fmt.Println("Current user:", name)
+			pterm.DefaultBasicText.Println("Current user:", name)
 
 			lg.Info("Login",
 				zap.String("first_name", self.FirstName),
@@ -179,6 +179,7 @@ func run(ctx context.Context, c *Config, s *Storage) error {
 			}
 			defer db.Close()
 
+			pterm.DefaultBasicText.Printf("Getting messages - this may take some time...please be patient...\n")
 			err = getMessages(ctx, client, db, self)
 			if err != nil {
 				lg.Sugar().Errorf("error getting messages: %v", err)
@@ -226,8 +227,6 @@ func removeState() error {
 		return errors.New("Error removing content from state directory")
 	}
 
-	pterm.Println("")
-	pterm.Print("All tgle state has been removed...")
 	return nil
 }
 
@@ -254,6 +253,9 @@ func validateArgs() (bool, error) {
 }
 
 func main() {
+
+	parseArguments()
+
 	validArgs, err := validateArgs()
 	if !validArgs {
 		log.Fatalf("invalid arguments: %v - exiting...", err.Error())
@@ -284,7 +286,20 @@ func main() {
 		_ = generateMarkdownReport(c)
 		return
 	case arg.RemoveState:
-		_ = removeState()
+		err := removeState()
+		if err == nil {
+			pterm.Println("")
+			pterm.DefaultBasicText.Printf("All tgle state has been removed - exiting...\n")
+			defer func() {
+				os.Exit(0)
+			}()
+		} else {
+			pterm.Println("")
+			pterm.DefaultBasicText.Printf("All tgle state has been removed - exiting...\n")
+			defer func() {
+				os.Exit(1)
+			}()
+		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -296,7 +311,7 @@ func main() {
 	if lastSyncRecord != nil {
 		lastSync = time.UnixMilli(lastSyncRecord.SyncTime.Int64)
 	}
-	fmt.Printf("last sync time: %v\n", lastSync)
+	lg.Sugar().Infof("last sync time: %v\n", lastSync)
 
 	if err := run(ctx, c, s); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
@@ -315,5 +330,5 @@ func main() {
 	}
 
 	_ = writeSyncRecord(ctx, c)
-	fmt.Println("Done")
+	pterm.DefaultBasicText.Println("Done.")
 }

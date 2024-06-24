@@ -15,6 +15,7 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+	"github.com/pterm/pterm"
 
 	"github.com/seanrmurphy/tgle/dbqueries"
 	"github.com/seanrmurphy/tgle/utils"
@@ -24,11 +25,12 @@ func getMessages(ctx context.Context, client *telegram.Client, db *sql.DB, self 
 
 	// first get Saved Messages - messages a user sends to themselves
 	messages, err := getSavedMessages(ctx, client, db, self.ID)
+	pterm.DefaultBasicText.Printf("Getting links from Saved Messages...\n")
 	if err != nil {
 		return errors.Wrap(err, "error getting saved messages")
 	}
 	if messages != nil {
-		utils.PrintMessages(messages, false)
+		utils.PrintMessages(messages, false, lg)
 		_ = storeSavedMessages(ctx, messages, db)
 	} else {
 		lg.Sugar().Info("no messages received...")
@@ -57,7 +59,7 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 	}
 	dialogs, err := api.MessagesGetDialogs(ctx, &request)
 	if err != nil {
-		fmt.Printf("Error: %+v\n", err)
+		lg.Sugar().Errorf("Error: %+v\n", err)
 		return nil, errors.Wrap(err, "error getting dialogs")
 	}
 	switch dialogs.TypeID() {
@@ -71,7 +73,7 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 				return nil, err
 			}
 			if messagesPerDialog != nil {
-				utils.PrintMessages(messages, false)
+				utils.PrintMessages(messages, false, lg)
 				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
@@ -85,7 +87,7 @@ func getMessagesFromUserDialogs(ctx context.Context, client *telegram.Client, us
 				return nil, err
 			}
 			if messagesPerDialog != nil {
-				utils.PrintMessages(messagesPerDialog, false)
+				utils.PrintMessages(messagesPerDialog, false, lg)
 				_ = storeMessages(ctx, messagesPerDialog, db)
 			}
 		}
@@ -121,6 +123,7 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, userID 
 		Name: name,
 		Type: tg.PeerUserTypeID,
 	}
+	pterm.DefaultBasicText.Printf("Getting messages from user %v...\n", name)
 	queries := dbqueries.New(db)
 	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, peerInfo.ID)
 	if err != nil && err != sql.ErrNoRows {
@@ -461,6 +464,7 @@ func getChatDialogMessages(ctx context.Context, client *telegram.Client, chatID 
 		Name: chat.Title,
 		Type: tg.PeerChatTypeID,
 	}
+	pterm.DefaultBasicText.Printf("Getting messages for chat: %v\n", chat.Title)
 	queries := dbqueries.New(db)
 	getLastUpdatebyPeerParams := dbqueries.GetLastUpdateByPeerParams{
 		ID:   peerInfo.ID,

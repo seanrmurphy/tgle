@@ -1,13 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/telegram"
+	"github.com/pterm/pterm"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	lj "gopkg.in/natefinch/lumberjack.v2"
@@ -52,7 +52,7 @@ func initializeStorage(c *Config) (s *Storage, err error) {
 	}
 	s.LogFilePath = filepath.Join(s.SessionDir, "log.jsonl")
 
-	fmt.Printf("Storing session in %s, logs in %s\n", s.SessionDir, s.LogFilePath)
+	pterm.DefaultBasicText.Printf("Storing session in %s, logs in %s\n", s.SessionDir, s.LogFilePath)
 
 	// So, we are storing session information in current directory, under subdirectory "session/phone_hash"
 	s.SessionStorage = &telegram.FileSessionStorage{
