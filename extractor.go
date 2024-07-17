@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/chromedp/chromedp"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-faster/errors"
@@ -245,8 +248,40 @@ func extractURL(message string) (string, error) {
 	return urls[0], nil
 }
 
-func getPageTitle(uri string) (string, error) {
+// twitter does not make it so easy to obtain the page title -
+// need to load it in a headless browser
+func getPageTitleUsingBrowser(uri string) (string, error) {
+	ctx, _ := chromedp.NewContext(context.Background())
+	var title string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(uri),
+		chromedp.Sleep(10*time.Second),
+		chromedp.Title(&title),
+	)
+	return title, err
+}
 
+func getPageTitle(uri string) (pageTitle string, err error) {
+
+	// twitter is a special case...
+	parsedURL, err := url.Parse(uri)
+	if err != nil {
+		return "", err
+	}
+
+	// Remove the "www." prefix if present
+	hostname := strings.TrimPrefix(parsedURL.Hostname(), "www.")
+
+	if hostname == "twitter.com" || hostname == "mobile.twitter.com" || hostname == "x.com" || hostname == "t.co" {
+		pageTitle, err = getPageTitleUsingBrowser(uri)
+		return
+	}
+
+	pageTitle, err = getPageTitleWithGet(uri)
+	return
+}
+
+func getPageTitleWithGet(uri string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, uri, nil)
 	if err != nil {
 		return "", err
@@ -254,11 +289,8 @@ func getPageTitle(uri string) (string, error) {
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
+		lg.Warn(err.Error())
 		return "", err
-	}
-
-	if err != nil {
-		lg.Fatal(err.Error())
 	}
 	defer res.Body.Close()
 
@@ -278,7 +310,6 @@ func getPageTitle(uri string) (string, error) {
 
 	title := doc.Find("title").Text()
 	return title, nil
-
 }
 
 func storeMessage(ctx context.Context, db *sql.DB, message tg.Message, savedMessage bool) error {
