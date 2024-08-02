@@ -26,8 +26,10 @@ import (
 
 func getMessages(ctx context.Context, client *telegram.Client, db *sql.DB, self *tg.User) error {
 	// first get Saved Messages - messages a user sends to themselves
+	spinnerType := createSpinnerType()
 	gettimgMessagesString := "Getting Saved Messages"
-	spinner, _ := pterm.DefaultSpinner.Start(gettimgMessagesString)
+	spinner, _ := spinnerType.Start(gettimgMessagesString)
+
 	messagesFromSaveMessages, err := getSavedMessages(ctx, client, db, self.ID)
 	if err != nil {
 		return errors.Wrap(err, "error getting saved messages")
@@ -44,7 +46,7 @@ func getMessages(ctx context.Context, client *telegram.Client, db *sql.DB, self 
 	}
 	numMessages := len(messages)
 	finalMessagesString := fmt.Sprintf("%v...(%v messages received)", gettimgMessagesString, numMessages)
-	spinner.Info(finalMessagesString)
+	spinner.Success(finalMessagesString)
 	if messagesFromSaveMessages != nil {
 		utils.PrintMessages(messagesFromSaveMessages, false, lg)
 		_ = storeSavedMessages(ctx, messagesFromSaveMessages, db)
@@ -115,6 +117,33 @@ func getMessagesFromDialogs(ctx context.Context, client *telegram.Client, userID
 	return
 }
 
+func createSpinnerType() *pterm.SpinnerPrinter {
+	blueNormalStyle := pterm.NewStyle(pterm.FgBlue)
+	blueBoldStyle := pterm.NewStyle(pterm.FgBlue, pterm.Bold)
+	greenStyle := pterm.NewStyle(pterm.FgGreen, pterm.Bold)
+	yellowStyle := pterm.NewStyle(pterm.FgYellow, pterm.Bold)
+	Info := pterm.PrefixPrinter{
+		MessageStyle: blueNormalStyle,
+		Prefix: pterm.Prefix{
+			Style: yellowStyle,
+			Text:  "🛈",
+		},
+	}
+
+	Success := pterm.PrefixPrinter{
+		MessageStyle: blueBoldStyle,
+		Prefix: pterm.Prefix{
+			Style: greenStyle,
+			Text:  "✔",
+		},
+	}
+
+	spinner := pterm.DefaultSpinner
+	spinner.InfoPrinter = &Info
+	spinner.SuccessPrinter = &Success
+	return &spinner
+}
+
 func getUserDialogMessages(ctx context.Context, client *telegram.Client, userID int64,
 	db *sql.DB) (messages tg.MessagesMessagesClass, err error) {
 	lg.Sugar().Infof("Dialog type User: getting user info for user = %v", userID)
@@ -139,8 +168,9 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, userID 
 		Name: name,
 		Type: tg.PeerUserTypeID,
 	}
+	spinnerType := createSpinnerType()
 	gettimgMessagesString := fmt.Sprintf("Getting messages from user %v", name)
-	spinner, _ := pterm.DefaultSpinner.Start(gettimgMessagesString)
+	spinner, _ := spinnerType.Start(gettimgMessagesString)
 
 	queries := dbqueries.New(db)
 	lastUpdatePerUser, err := queries.GetLastUpdateByUser(ctx, peerInfo.ID)
@@ -159,7 +189,7 @@ func getUserDialogMessages(ctx context.Context, client *telegram.Client, userID 
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	highestOffset, numMessages := getMaxOffset(messages)
 	finalMessagesString := fmt.Sprintf("%v...(%v messages received)", gettimgMessagesString, numMessages)
-	spinner.Info(finalMessagesString)
+	spinner.Success(finalMessagesString)
 	if numMessages != 0 {
 		insertDialogParams := dbqueries.InsertDialogParams{
 			ID:         peerInfo.ID,
@@ -514,8 +544,10 @@ func getChatDialogMessages(ctx context.Context, client *telegram.Client, chatID 
 		Name: chat.Title,
 		Type: tg.PeerChatTypeID,
 	}
+	spinnerType := createSpinnerType()
 	gettimgMessagesString := fmt.Sprintf("Getting messages for chat %v", chat.Title)
-	spinner, _ := pterm.DefaultSpinner.Start(gettimgMessagesString)
+	spinner, _ := spinnerType.Start(gettimgMessagesString)
+
 	queries := dbqueries.New(db)
 	getLastUpdatebyPeerParams := dbqueries.GetLastUpdateByPeerParams{
 		ID:   peerInfo.ID,
@@ -539,7 +571,7 @@ func getChatDialogMessages(ctx context.Context, client *telegram.Client, chatID 
 	messages, err = client.API().MessagesSearch(ctx, &searchRequest)
 	highestOffset, numMessages := getMaxOffset(messages)
 	finalMessagesString := fmt.Sprintf("%v...(%v messages received)", gettimgMessagesString, numMessages)
-	spinner.Info(finalMessagesString)
+	spinner.Success(finalMessagesString)
 	if numMessages != 0 {
 		insertDialogParams := dbqueries.InsertDialogParams{
 			ID:         peerInfo.ID,
