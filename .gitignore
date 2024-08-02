@@ -8,3 +8,5 @@ telegram-bot
 tgle
 json.out
 main_test.go
+.direnv/bin
+.direnv
