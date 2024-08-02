@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/pterm/pterm"
 
 	"github.com/chasefleming/elem-go"
 	"github.com/chasefleming/elem-go/attrs"
@@ -38,7 +37,7 @@ func runServer(c *Config) {
 	mux.Handle("/", middleware.MiddleWare(http.HandlerFunc(app.Home)))
 	mux.Handle("/links", middleware.MiddleWare(http.HandlerFunc(app.Links)))
 
-	pterm.DefaultBasicText.Printf("running server on port 3000...\n")
+	info.Printf("running server on port 3000...\n")
 	srv := &http.Server{
 		Addr:              ":3000",
 		ReadTimeout:       1 * time.Second,

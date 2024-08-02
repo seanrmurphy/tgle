@@ -38,20 +38,24 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-//go:embed sql/schema.sql
-var ddl string
-
-var dbFilename = "sqlite.db"
-
-var lg *zap.Logger
-
-var arg struct {
+type arguments struct {
 	FillPeerStorage bool
 	ServerMode      bool
 	JSONReport      bool
 	MarkdownReport  bool
 	RemoveState     bool
 }
+
+//go:embed sql/schema.sql
+var ddl string
+
+var (
+	dbFilename = "sqlite.db"
+	lg         *zap.Logger
+	arg        arguments
+	info       pterm.PrefixPrinter
+	success    pterm.PrefixPrinter
+)
 
 func parseArguments() {
 	// TODO: figure out what to do with the fill peer storage
@@ -180,7 +184,7 @@ func run(ctx context.Context, c *Config, s *Storage) error {
 			}
 			defer db.Close()
 
-			pterm.DefaultBasicText.Printf("Getting messages - this may take some time...please be patient...\n")
+			info.Printf("Getting messages - this may take some time...please be patient...\n")
 			err = getMessages(ctx, client, db, self)
 			if err != nil {
 				lg.Sugar().Errorf("error getting messages: %v", err)
@@ -253,9 +257,33 @@ func validateArgs() (bool, error) {
 	return true, nil
 }
 
+func setupPrinters() {
+	blueNormalStyle := pterm.NewStyle(pterm.FgBlue)
+	blueBoldStyle := pterm.NewStyle(pterm.FgBlue, pterm.Bold)
+	greenStyle := pterm.NewStyle(pterm.FgGreen, pterm.Bold)
+	yellowStyle := pterm.NewStyle(pterm.FgYellow, pterm.Bold)
+	info = pterm.PrefixPrinter{
+		MessageStyle: blueNormalStyle,
+		Prefix: pterm.Prefix{
+			Style: yellowStyle,
+			Text:  "🛈",
+		},
+	}
+
+	success = pterm.PrefixPrinter{
+		MessageStyle: blueBoldStyle,
+		Prefix: pterm.Prefix{
+			Style: greenStyle,
+			Text:  "✔",
+		},
+	}
+}
+
 func main() {
 
 	parseArguments()
+
+	setupPrinters()
 
 	validArgs, err := validateArgs()
 	if !validArgs {
@@ -277,9 +305,6 @@ func main() {
 	defer func() { _ = lg.Sync() }()
 
 	switch {
-	case arg.ServerMode:
-		runServer(c)
-		return
 	case arg.JSONReport:
 		_ = generateJSONReport(c)
 		return
@@ -331,5 +356,8 @@ func main() {
 	}
 
 	_ = writeSyncRecord(ctx, c)
-	pterm.DefaultBasicText.Println("Done.")
+
+	success.Println("Sync complete.")
+	info.Println("Launching server...")
+	runServer(c)
 }
