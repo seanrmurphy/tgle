@@ -614,30 +614,3 @@ func writeSyncRecord(ctx context.Context, c *Config) error {
 	}
 	return nil
 }
-
-func getLastSyncTime(ctx context.Context, c *Config) (*dbqueries.TgleSync, error) {
-	db, err := sql.Open("sqlite3", filepath.Join(c.TgleStateDirectory, dbFilename))
-	if err != nil {
-		lg.Sugar().Errorf("error opening database: %v", err)
-		return nil, err
-	}
-
-	// create tables
-	if _, err = db.ExecContext(ctx, ddl); err != nil {
-		lg.Sugar().Errorf("error creating db tables: %v", err)
-		return nil, err
-	}
-	defer db.Close()
-
-	queries := dbqueries.New(db)
-
-	lastSyncRecord, err := queries.GetLastTGSync(ctx)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		lg.Sugar().Errorf("error getting last sync record: %v", err)
-		return nil, err
-	}
-	return &lastSyncRecord, nil
-}
