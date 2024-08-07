@@ -331,33 +331,50 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// TODO: Add logic to handle the case in which this record does not exist...
-	lastSyncRecord, _ := getLastSyncTime(ctx, c)
-	lastSync := time.UnixMilli(0)
-	if lastSyncRecord != nil {
-		lastSync = time.UnixMilli(lastSyncRecord.SyncTime.Int64)
-	}
-	lg.Sugar().Infof("last sync time: %v\n", lastSync)
+	// Create a channel to signal when the main process is done
+	done := make(chan bool)
 
-	if err := run(ctx, c, s); err != nil {
-		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
-			fmt.Println("\rClosed")
-			defer func() {
-				os.Exit(1)
-			}()
+	go func() {
+		// ... (previous run logic remains here)
+		if err := run(ctx, c, s); err != nil {
+			if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
+				fmt.Println("\rClosed")
+				done <- true
+				return
+			}
+
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
+			done <- true
 			return
 		}
 
-		_, _ = fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
-		defer func() {
-			os.Exit(1)
-		}()
-		return
+		_ = writeSyncRecord(ctx, c)
+
+		success.Println("Sync complete.")
+		info.Println("Launching server...")
+		runServer(c)
+
+		// Signal that the main process is done
+		done <- true
+	}()
+
+	// Wait for either the main process to finish or for a signal (e.g., Ctrl+C)
+	select {
+	case <-ctx.Done():
+		info.Println("Received interrupt signal. Shutting down...")
+		// Wait for the main process to finish (with a timeout)
+		select {
+		case <-done:
+			success.Println("Shutdown complete.")
+		case <-time.After(5 * time.Second):
+			info.Println("Shutdown timed out after 5 seconds.")
+		}
+	case <-done:
+		// Main process finished normally
 	}
 
-	_ = writeSyncRecord(ctx, c)
+	// Perform any necessary cleanup here
+	// ...
 
-	success.Println("Sync complete.")
-	info.Println("Launching server...")
-	runServer(c)
+	info.Println("Exiting program.")
 }
